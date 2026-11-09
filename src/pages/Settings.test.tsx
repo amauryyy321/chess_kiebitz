@@ -133,6 +133,8 @@ const androidSettings = {
   board_signs: true,
   import_months: 3,
   puzzle_goal: 10,
+  puzzle_review_seconds: 120,
+  game_review_seconds: 120,
   puzzle_hide_theme: false,
   rep_due_limit: 20,
   rep_new_limit: 5,
@@ -436,6 +438,10 @@ describe("Settings loading", () => {
     expect(soundToggle.checked).toBe(false);
     // Die Rechenwerte liegen hinter dem Stift · offen steht die Einleitung.
     expect(screen.getByText("tn.lead")).toBeTruthy();
+    const liveDepth = screen.getByText("set.liveDepth").closest("label")!.querySelector("input") as HTMLInputElement;
+    const gameDepth = screen.getByText("set.batchDepth").closest("label")!.querySelector("input") as HTMLInputElement;
+    expect([liveDepth.value, liveDepth.min, liveDepth.max]).toEqual(["16", "8", "40"]);
+    expect([gameDepth.value, gameDepth.min, gameDepth.max]).toEqual(["18", "6", "30"]);
     // Jede Gruppe trägt ihre Überschrift zweimal: in der Seite und in der
     // Sprungleiste daneben.
     for (const group of ["set.group.basics", "set.group.account", "set.group.training", "set.group.app", "set.advanced"]) {
@@ -452,7 +458,6 @@ describe("Settings loading", () => {
       "set.appearance",
       "set.tour",
       // Konto
-      "plus.title",
       "set.accounts",
       "set.sync",
       // Training · Widgets fehlen bewusst: die Homescreen-Widgets gibt es nur
@@ -467,6 +472,7 @@ describe("Settings loading", () => {
       "set.about",
       // Erweitert · „Schach-Engine" und „Engines und Turnier" sind eins.
       "tn.section",
+      "set.depthTitle",
       "set.database",
       "set.chessdb",
       "set.explorer",

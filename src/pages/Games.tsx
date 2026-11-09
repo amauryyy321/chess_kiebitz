@@ -54,6 +54,11 @@ import { leseZeichen } from "../lib/informator";
 import { exportPgn, importPgn, PgnPlayerMismatchError } from "../lib/pgn";
 
 const PAGE_SIZE_KEY = "kiebitz.games.pageSize";
+type GameSort = "recent" | "accuracy_asc" | "accuracy_desc";
+const MODE_FILTERS = [
+  "bullet", "blitz", "rapid", "classical", "daily", "otb",
+  "bullet-960", "blitz-960", "rapid-960", "classical-960", "daily-960", "otb-960",
+] as const;
 /**
  * Wie viele Partien auf eine Seite gehen · frei zwischen diesen Grenzen.
  *
@@ -149,6 +154,7 @@ export default function Games({
   // Formularfeld neben Quelle und Ergebnis · in der gewöhnlichen Fassung
   // führen die Pillen dieselbe Einschränkung über das genaue Datum.
   const [zeitraum, setZeitraum] = useState<Zeitraum>("alle");
+  const [sortBy, setSortBy] = useState<GameSort>("recent");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Vorschau allein · siehe components/FocusBoard.tsx. */
   const [focused, setFocused] = useState(false);
@@ -190,6 +196,7 @@ export default function Games({
       color,
       eco,
       query,
+      sort_by: sortBy,
     })
       .then((resultPage) => {
         if (sequence !== reloadSequence.current) return;
@@ -202,7 +209,7 @@ export default function Games({
 
   useEffect(() => {
     if (backend.mode === "desktop") reload();
-  }, [backend.mode, locale, source, result, query, pageSize, page, tc, dateKey, opponent, opening, color, eco, zeitraum]);
+  }, [backend.mode, locale, source, result, query, pageSize, page, tc, dateKey, opponent, opening, color, eco, zeitraum, sortBy]);
 
   const databaseLoaded = dbGames !== null;
   const allGames: UiGame[] = databaseLoaded ? dbGames : demoGames;
@@ -239,8 +246,16 @@ export default function Games({
             g.opponent.toLowerCase().includes(query.toLowerCase()) ||
             g.opening.toLowerCase().includes(query.toLowerCase()) ||
             g.tags.some((tag) => tag.toLowerCase().includes(query.toLowerCase())))
-      ),
-    [allGames, databaseLoaded, source, result, tc, dateKey, opponent, opening, color, eco, query, zeitraumSeit]
+      ).sort((a, b) => {
+        if (sortBy === "recent") return 0;
+        if (a.accuracy == null && b.accuracy != null) return 1;
+        if (a.accuracy != null && b.accuracy == null) return -1;
+        if (a.accuracy != null && b.accuracy != null && a.accuracy !== b.accuracy) {
+          return sortBy === "accuracy_asc" ? a.accuracy - b.accuracy : b.accuracy - a.accuracy;
+        }
+        return (gamePlayedTs(b) ?? 0) - (gamePlayedTs(a) ?? 0);
+      }),
+    [allGames, databaseLoaded, source, result, tc, dateKey, opponent, opening, color, eco, query, zeitraumSeit, sortBy]
   );
 
   const selectedSummary = filtered.find((g) => g.id === selectedId) ?? filtered[0];
@@ -277,7 +292,7 @@ export default function Games({
   }, [selectedSummary?.dbId]);
 
   // Paginierung: bei Filter-/Seitengröße-Wechsel zurück auf Seite 1.
-  useEffect(() => setPage(1), [source, result, query, pageSize, tc, dateKey, opponent, opening, color, eco, zeitraum]);
+  useEffect(() => setPage(1), [source, result, query, pageSize, tc, dateKey, opponent, opening, color, eco, zeitraum, sortBy]);
   const totalResults = databaseLoaded ? filteredTotal : filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalResults / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -406,6 +421,29 @@ export default function Games({
       {s === "alle" ? t("games.allSources") : s === "manual" ? t("games.sourceManual") : s}
     </Chip>
   ));
+  const modeChips = (["", ...MODE_FILTERS] as const).map((mode) => (
+    <Chip key={mode || "all-modes"} active={tc === mode} onClick={() => setTc(mode)}>
+      {mode ? tcLabel(mode, locale) : t("blatt.filterAll")}
+    </Chip>
+  ));
+  const accuracySortChips = ([
+    ["recent", t("games.sortRecent")],
+    ["accuracy_asc", t("games.accuracyAscending")],
+    ["accuracy_desc", t("games.accuracyDescending")],
+  ] as const).map(([value, label]) => (
+    <Chip key={value} active={sortBy === value} onClick={() => setSortBy(value)}>{label}</Chip>
+  ));
+  const toggleAccuracySort = () =>
+    setSortBy((current) => current === "recent" ? "accuracy_desc" : current === "accuracy_desc" ? "accuracy_asc" : "recent");
+  const cycleModeFilter = () => {
+    const index = MODE_FILTERS.indexOf(tc as (typeof MODE_FILTERS)[number]);
+    setTc(tc === "" || index < 0 || index === MODE_FILTERS.length - 1 ? "" : MODE_FILTERS[index + 1]);
+  };
+  const cycleSourceFilter = () => {
+    const sources = ["alle", "chess.com", "lichess", "manual"] as const;
+    const index = sources.indexOf(source);
+    setSource(sources[(index + 1) % sources.length]);
+  };
   const resultChips = (
     [
       ["alle", t("games.allResults")],
@@ -1131,7 +1169,21 @@ export default function Games({
               wert: source === "alle" ? t("blatt.filterAll") : source,
               leer: source === "alle",
               breite: 112,
-              onClick: () => setSource(source === "alle" ? "chess.com" : source === "chess.com" ? "lichess" : "alle"),
+              onClick: cycleSourceFilter,
+            },
+            {
+              label: t("games.colMode"),
+              wert: tc ? tcLabel(tc, locale) : t("blatt.filterAll"),
+              leer: tc === "",
+              breite: 112,
+              onClick: cycleModeFilter,
+            },
+            {
+              label: t("games.sortBy"),
+              wert: t(sortBy === "recent" ? "games.sortRecent" : sortBy === "accuracy_asc" ? "games.accuracyAscending" : "games.accuracyDescending"),
+              leer: sortBy === "recent",
+              breite: 132,
+              onClick: toggleAccuracySort,
             },
             {
               label: t("games.colResult"),
@@ -1466,6 +1518,8 @@ export default function Games({
           </div>
           {sourceChips}
           <span className="mx-1 h-4 w-px bg-line2" />
+          {modeChips}
+          <span className="mx-1 h-4 w-px bg-line2" />
           {resultChips}
         </div>
       )}
@@ -1523,7 +1577,20 @@ export default function Games({
                 <th className="px-2 font-medium">{t("games.colOpponent")}</th>
                 <th className="px-2 font-medium">{t("games.colOpening")}</th>
                 <th className="px-2 font-medium">{t("games.colResult")}</th>
-                <th className="px-2 text-right font-medium">{t("games.colAccuracy")}</th>
+                <th
+                  className="px-2 text-right font-medium"
+                  aria-sort={sortBy === "accuracy_asc" ? "ascending" : sortBy === "accuracy_desc" ? "descending" : "none"}
+                >
+                  <button
+                    type="button"
+                    onClick={toggleAccuracySort}
+                    aria-label={`${t("games.colAccuracy")}${sortBy === "accuracy_asc" ? " ↑" : sortBy === "accuracy_desc" ? " ↓" : ""}`}
+                    className="whitespace-nowrap hover:text-ink"
+                    title={t("games.colAccuracy")}
+                  >
+                    {t("games.colAccuracy")} {sortBy === "accuracy_asc" ? "↑" : sortBy === "accuracy_desc" ? "↓" : "↕"}
+                  </button>
+                </th>
                 <th className="w-[112px] py-2.5 pl-2 pr-4 text-right font-medium">{t("games.colTags")}</th>
               </tr>
             </thead>
@@ -1781,9 +1848,21 @@ export default function Games({
           </div>
           <div className="border-t border-line px-4 py-3">
             <div className="text-[11px] font-medium uppercase tracking-wider text-ink3">
+              {t("games.colMode")}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">{modeChips}</div>
+          </div>
+          <div className="border-t border-line px-4 py-3">
+            <div className="text-[11px] font-medium uppercase tracking-wider text-ink3">
               {t("games.colResult")}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">{resultChips}</div>
+          </div>
+          <div className="border-t border-line px-4 py-3">
+            <div className="text-[11px] font-medium uppercase tracking-wider text-ink3">
+              {t("games.colAccuracy")}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">{accuracySortChips}</div>
           </div>
           {exactFilters.length > 0 && (
             <div className="border-t border-line px-4 py-3">

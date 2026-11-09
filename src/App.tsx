@@ -24,6 +24,7 @@ import {
   Puzzle as PuzzleIcon,
   RefreshCw,
   Settings as SettingsIcon,
+  Swords,
   X,
 } from "lucide-react";
 import { useBackendInfo } from "./lib/backend";
@@ -58,9 +59,7 @@ import { SHEET_ROOT_ID } from "./components/MobileSheet";
 import { dismissLayers } from "./lib/backDismiss";
 import type { EndgameCategory } from "./data/endgames";
 import AdBanner from "./components/AdBanner";
-import PlanBadge from "./components/PlanBadge";
 import BrandMark from "./components/BrandMark";
-import PlusDialog from "./components/PlusDialog";
 import { installDeepLinks } from "./lib/plus/deepLink";
 import { usePlus } from "./lib/plus/usePlus";
 import { dateLocale, deInt } from "./lib/format";
@@ -77,6 +76,9 @@ import {
   registerZahlen,
 } from "./components/blatt/Register";
 import { tourSteps } from "./lib/tourSteps";
+import DesktopWindowControls from "./components/DesktopWindowControls";
+import OnlineResultDialog from "./components/OnlineResultDialog";
+import type { OnlineResult } from "./pages/OnlinePlay";
 
 export type { PageId };
 
@@ -85,7 +87,9 @@ const pageLoaders = {
   games: () => import("./pages/Games"),
   analysis: () => import("./pages/Analysis"),
   play: () => import("./pages/Play"),
+  online: () => import("./pages/OnlinePlay"),
   repertoire: () => import("./pages/Repertoire"),
+  knowledge: () => import("./pages/Knowledge"),
   endgame: () => import("./pages/Endgame"),
   puzzles: () => import("./pages/Puzzles"),
   study: () => import("./pages/Study"),
@@ -98,7 +102,9 @@ const Dashboard = lazy(pageLoaders.dashboard);
 const Games = lazy(pageLoaders.games);
 const Analysis = lazy(pageLoaders.analysis);
 const Play = lazy(pageLoaders.play);
+const OnlinePlay = lazy(pageLoaders.online);
 const Repertoire = lazy(pageLoaders.repertoire);
+const Knowledge = lazy(pageLoaders.knowledge);
 const Endgame = lazy(pageLoaders.endgame);
 const Puzzles = lazy(pageLoaders.puzzles);
 const Study = lazy(pageLoaders.study);
@@ -113,7 +119,9 @@ const LIKELY_NEXT_PAGES: Record<PageId, PageId[]> = {
   games: ["analysis", "dashboard"],
   analysis: ["games", "insights"],
   play: ["analysis", "games"],
+  online: ["analysis", "games"],
   repertoire: ["study", "games"],
+  knowledge: ["repertoire", "analysis"],
   endgame: ["study", "puzzles"],
   puzzles: ["study", "analysis"],
   study: ["puzzles", "endgame"],
@@ -139,7 +147,9 @@ const nav: { id: PageId; labelKey: Key; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { id: "games", labelKey: "nav.games", icon: Database },
   { id: "analysis", labelKey: "nav.analysis", icon: Activity },
+  { id: "online", labelKey: "nav.online", icon: Swords },
   { id: "repertoire", labelKey: "nav.repertoire", icon: BookOpen },
+  { id: "knowledge", labelKey: "nav.knowledge", icon: GraduationCap },
   { id: "puzzles", labelKey: "nav.puzzles", icon: PuzzleIcon },
   { id: "endgame", labelKey: "nav.endgame", icon: Crown },
   { id: "study", labelKey: "nav.study", icon: GraduationCap },
@@ -174,8 +184,13 @@ export default function App() {
   // Der Stapel hält die Seite samt Deep-Link-Parametern und hängt an der
   // Session-History · siehe lib/nav.ts. Erst dadurch tut die Android-Zurück-
   // Taste etwas anderes, als die App zu beenden.
-  const { route, depth, navigate: switchTo, push: pushLevel, back } = useNavStack();
+  const { route, depth, navigate: switchTo, push: pushLevel, back, setNavigationLocked } = useNavStack();
   const page = route.page;
+  const [playLocked, setPlayLocked] = useState(false);
+  const [onlineResult, setOnlineResult] = useState<OnlineResult | null>(null);
+  const unlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (unlockTimer.current) clearTimeout(unlockTimer.current); }, []);
+  useEffect(() => { if (page !== "analysis") setOnlineResult(null); }, [page]);
   // Der Scroll-Container der Shell · dieselbe Fläche für alle Seiten.
   const mainRef = useRef<HTMLElement>(null);
   const depthRef = useRef(depth);
@@ -195,10 +210,11 @@ export default function App() {
   // jedes Hauptziel wie bisher am Kopf der Seite beginnt.
   const goTo = useCallback(
     (target: PageId, params?: RouteParams) => {
+      if (target === "online" && playLocked) return;
       forgetPages();
       switchTo(target, params);
     },
-    [switchTo]
+    [switchTo, playLocked]
   );
   const backend = useBackendInfo();
   const t = useT();
@@ -401,15 +417,10 @@ export default function App() {
     };
   }, [backend.mode]);
 
-  // Deep Links: `kiebitz://auth?code=…` aus dem Magic-Link der E-Mail und
-  // `kiebitz://open?page=…` von den Android-Widgets. Die Einlösung der
-  // Anmeldung passiert im Hintergrund; sichtbar wird sie dort, wo der
-  // Kontostatus steht.
+  // Deep Links für Android-Widgets und geteilte Stellungen.
   useEffect(() => {
     if (backend.mode !== "desktop") return;
     return installDeepLinks({
-      onSignedIn: () => logEvent("info", "plus", "Anmeldung über Deep-Link abgeschlossen"),
-      onError: () => logEvent("warn", "plus", "Anmeldelink konnte nicht eingelöst werden"),
       onOpenPage: (page) => goTo(page),
       // Eine geteilte Stellung landet am freien Brett der Analyse · dort kann
       // man sie sofort weiterspielen und rechnen lassen.
@@ -690,6 +701,7 @@ export default function App() {
       zahlen={zahlen}
       onSelect={navigate}
       foot={registerFoot}
+      disabledIds={playLocked ? ["online"] : []}
     />
   ) : (
     <>
@@ -701,7 +713,6 @@ export default function App() {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-[15px] font-semibold tracking-tight">Kiebitz</span>
-            <PlanBadge />
           </div>
           <div className="text-[11px] text-ink3">{t(taglineKey())}</div>
         </div>
@@ -712,11 +723,12 @@ export default function App() {
           <button
             key={id}
             onClick={() => navigate(id)}
+            disabled={id === "online" && playLocked}
             data-tour={`nav-${id}`}
             className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left text-[13.5px] transition-colors ${
               sidebarTab === id
                 ? "bg-panel3 font-medium text-ink"
-                : "text-ink2 hover:bg-panel2 hover:text-ink"
+                : id === "online" && playLocked ? "cursor-not-allowed text-ink3 opacity-50" : "text-ink2 hover:bg-panel2 hover:text-ink"
             }`}
           >
             <Icon size={17} className={sidebarTab === id ? "text-accent" : "text-ink3"} />
@@ -827,12 +839,42 @@ export default function App() {
         <Games openAnalysis={openAnalysis} initialFilter={route.filter ?? null} />
       )}
       {page === "analysis" && (
+        <>
+        {route.analysisNotice && <p role="alert" className="mx-auto max-w-[1240px] px-4 pt-4 text-[13px] text-loss">{route.analysisNotice}</p>}
+        {route.autoAnalyze && (
+          <div className="mx-auto max-w-[1240px] px-4 pt-4">
+            <button type="button" disabled={playLocked} onClick={() => goTo("online")}
+              className="rounded-lg border border-line px-3 py-2 text-[13px] disabled:cursor-not-allowed disabled:opacity-50">
+              {t("play.newGame")}
+            </button>
+          </div>
+        )}
         <Analysis
           targetGameId={route.gameId ?? null}
+          autoAnalyze={route.autoAnalyze ?? false}
+          onAutoComplete={() => {
+            if (unlockTimer.current) clearTimeout(unlockTimer.current);
+            unlockTimer.current = setTimeout(() => setPlayLocked(false), 60_000);
+          }}
           shared={route.shared ?? null}
           line={route.line ?? null}
+          puzzleReview={route.puzzleReview ?? false}
+          reviewSeconds={route.reviewSeconds ?? 120}
+          onReviewComplete={() => setNavigationLocked(false)}
+          onNextPuzzle={() => { setNavigationLocked(false); back(); }}
           onPlay={(fen, chess960, sans) => push("play", { play: { fen, chess960, sans } })}
           onNewGame={() => push("play")}
+        />
+        </>
+      )}
+      {page === "online" && (
+        <OnlinePlay
+          onRecorded={(gameId, result, notice) => {
+            setPlayLocked(true);
+            setOnlineResult(result);
+            goTo("analysis", { gameId, autoAnalyze: true, analysisNotice: notice });
+          }}
+          onConnectionIssue={(notice) => { setOnlineResult(null); goTo("analysis", { analysisNotice: notice }); }}
         />
       )}
       {/* Die Partie kehrt in die Analyse zurück, statt eine zweite darauf zu
@@ -847,12 +889,17 @@ export default function App() {
         />
       )}
       {page === "repertoire" && <Repertoire />}
+      {page === "knowledge" && <Knowledge />}
       {page === "endgame" && <Endgame initialCategory={route.endgameCategory} />}
       {page === "puzzles" && (
         <Puzzles
           initialTheme={route.theme ?? ""}
           initialMinRating={route.minRating ?? 0}
           initialMaxRating={route.maxRating ?? 0}
+          openAnalysis={(line, failed, seconds) => {
+            push("analysis", { line, puzzleReview: failed === true, reviewSeconds: seconds });
+            if (failed && seconds && seconds > 0) setNavigationLocked(true);
+          }}
         />
       )}
       {page === "study" && (
@@ -948,7 +995,9 @@ export default function App() {
 
   const overlays = (
     <>
-      <PlusDialog openSettings={() => navigate("settings")} />
+      {page === "analysis" && onlineResult && (
+        <OnlineResultDialog result={onlineResult} onViewAnalysis={() => setOnlineResult(null)} />
+      )}
       {tourOpen && (
         <Suspense fallback={null}>
           <GuidedTour steps={steps} onNavigate={navigate} onDone={() => setTourOpen(false)} />
@@ -1029,7 +1078,9 @@ export default function App() {
 
   // ── Desktop-Shell ──────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full flex-col md:flex-row">
+    <div className="flex h-full flex-col">
+      <DesktopWindowControls />
+      <div className="flex min-h-0 flex-1 md:flex-row">
       <aside className="hidden w-[228px] shrink-0 flex-col border-r border-line bg-panel md:flex">
         {sidebarContent}
       </aside>
@@ -1053,7 +1104,6 @@ export default function App() {
               <span className="text-[15px] font-semibold tracking-tight">Kiebitz</span>
             </>
           )}
-          <PlanBadge />
         </div>
         <button
           onClick={() => setNavOpen(true)}
@@ -1098,6 +1148,7 @@ export default function App() {
       </main>
 
       {showAds && <AdBanner android={false} />}
+      </div>
       </div>
 
       {updateNotice}

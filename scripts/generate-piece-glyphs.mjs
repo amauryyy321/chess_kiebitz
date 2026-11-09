@@ -55,7 +55,7 @@ const file = `// Erzeugt von scripts/generate-piece-glyphs.mjs · nicht von Hand
 //
 // Zeichnungen: SVG chess pieces von en:User:Cburnett, CC BY-SA 3.0
 // https://commons.wikimedia.org/w/index.php?curid=1499810
-// Siehe THIRD_PARTY_NOTICES.md · Abschnitt "Chess piece artwork".
+// Siehe THIRD_PARTY_CREDITS.md · Abschnitt "Board piece artwork by Cburnett".
 
 /** Innerer SVG-Inhalt je Figur · gezeichnet in einem 45×45-Feld. */
 export const PIECE_GLYPH: Record<string, string> = {

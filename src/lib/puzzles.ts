@@ -87,6 +87,10 @@ export function nextPuzzle(opts: {
   });
 }
 
+export function puzzleById(id: string): Promise<PuzzleOut | null> {
+  return invoke<PuzzleOut | null>("puzzle_by_id", { id });
+}
+
 export function recordAttempt(puzzleId: string, solved: boolean): Promise<AttemptResult> {
   return invoke<AttemptResult>("record_attempt", { puzzleId, solved }).then((r) => {
     emitDataChange("puzzles");

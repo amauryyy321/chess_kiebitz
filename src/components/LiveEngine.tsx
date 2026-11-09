@@ -118,6 +118,8 @@ export default function LiveEngine({
   demoLines,
   onEval,
   onBestMove,
+  onStarted,
+  onUnavailable,
   onMove,
   blatt = false,
   verdeckt = false,
@@ -127,6 +129,8 @@ export default function LiveEngine({
   /** Bewertung aus Weiß-Sicht, sobald die Engine Tiefe gewinnt. */
   onEval?: (evalCp: number | null, mateIn: number | null) => void;
   onBestMove?: (uci: string | null) => void;
+  onStarted?: () => void;
+  onUnavailable?: () => void;
   /** Spielt den ersten Zug einer angeklickten Hauptvariante. */
   onMove?: (uci: string) => void;
   /**
@@ -161,6 +165,10 @@ export default function LiveEngine({
   onEvalRef.current = onEval;
   const onBestMoveRef = useRef(onBestMove);
   onBestMoveRef.current = onBestMove;
+  const onStartedRef = useRef(onStarted);
+  onStartedRef.current = onStarted;
+  const onUnavailableRef = useRef(onUnavailable);
+  onUnavailableRef.current = onUnavailable;
   const pendingInfoRef = useRef<Map<number, LiveInfo>>(new Map());
   const earlyInfoRef = useRef<Map<number, Map<number, LiveInfo>>>(new Map());
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -178,8 +186,8 @@ export default function LiveEngine({
 
   useEffect(() => {
     engineInfo()
-      .then((info) => setEngine({ mode: "desktop", info }))
-      .catch(() => setEngine({ mode: "web" }));
+      .then((info) => { setEngine({ mode: "desktop", info }); if (!info.available) onUnavailableRef.current?.(); })
+      .catch(() => { setEngine({ mode: "web" }); onUnavailableRef.current?.(); });
   }, []);
 
   const available = engine.mode === "desktop" && engine.info.available;
@@ -310,6 +318,7 @@ export default function LiveEngine({
         const generation = await analyzeLive(fen);
         if (stale) return;
         genRef.current = generation;
+        onStartedRef.current?.();
         const early = earlyInfoRef.current.get(generation);
         earlyInfoRef.current.clear();
         if (early) {
@@ -327,7 +336,9 @@ export default function LiveEngine({
           }
         }
       });
-      engineCommandRef.current = next.catch(() => {});
+      engineCommandRef.current = next.catch(() => {
+        if (!stale) onUnavailableRef.current?.();
+      });
     }, ENGINE_START_DELAY_MS);
     return () => {
       stale = true;

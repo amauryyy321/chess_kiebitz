@@ -98,6 +98,7 @@ export interface BuchTeil {
 }
 
 export interface RepertoireBlattProps {
+  showVariants?: boolean;
   mobile: boolean;
   kopfRechts: ReactNode;
   felder: Feld[];
@@ -134,7 +135,7 @@ export interface RepertoireBlattProps {
    * Die Prüftiefe · 6, 8, 12 oder 16 Halbzüge, wählbar wie drüben. Ohne sie
    * steht die Quote ohne Wahl da.
    */
-  tiefe?: { werte: number[]; aktiv: number; onWaehlen: (value: number) => void };
+  tiefe?: { werte: number[]; aktiv: number; onWaehlen: (value: number) => void; onTraining?: () => void };
   /** Die Abdeckung je Farbe · als Weiß, als Schwarz. */
   seiten?: SideCoverage[];
   /** Was über die Lücken zu sagen ist, solange keine Liste dasteht. */
@@ -194,7 +195,7 @@ export interface RepertoireBlattProps {
    * (lib/repertoireKarte.ts), hier als Tafel gestochen. `namen` sind die
    * Namen der Varianten, wie das Verzeichnis sie führt.
    */
-  karte?: { daten: Karte; namen: Record<string, string> };
+  karte?: { daten: Karte; namen: Record<string, string>; aktiv?: string | null; nachfahren?: boolean; controls?: ReactNode };
 }
 
 /** Was gerade am Zeiger hängt · Teil, Herkunft, Ziel und der Weg dorthin. */
@@ -207,6 +208,7 @@ interface Ziehen {
 }
 
 export default function RepertoireBlatt({
+  showVariants = true,
   mobile,
   kopfRechts,
   felder,
@@ -641,18 +643,20 @@ export default function RepertoireBlatt({
         </Aufdeckfeld>
       )}
 
-      {abdeckung != null && (
+      {(abdeckung != null || tiefe != null) && (
         <div>
           <Rubrik>{t("rep.coverage")}</Rubrik>
-          <div className="mt-2.5 flex items-end gap-3.5">
-            <span className="blatt-zahl text-[26px] font-medium leading-none text-ink">
-              {de(abdeckung)} %
-            </span>
-            <span className="min-w-0 flex-1 pb-[3px]">
-              <Balken anteil={abdeckung} hoehe={8} />
-              <span className="mt-1 block text-[11px] text-ink3">{abdeckungUnter}</span>
-            </span>
-          </div>
+          {abdeckung != null && (
+            <div className="mt-2.5 flex items-end gap-3.5">
+              <span className="blatt-zahl text-[26px] font-medium leading-none text-ink">
+                {de(abdeckung)} %
+              </span>
+              <span className="min-w-0 flex-1 pb-[3px]">
+                <Balken anteil={abdeckung} hoehe={8} />
+                <span className="mt-1 block text-[11px] text-ink3">{abdeckungUnter}</span>
+              </span>
+            </div>
+          )}
           {seiten && seiten.length > 0 && (
             <div className="mt-2.5">
               {seiten.map((seite) => (
@@ -691,6 +695,7 @@ export default function RepertoireBlatt({
                   {t("rep.coveragePlies", { n: deInt(wert) })}
                 </button>
               ))}
+              {tiefe.onTraining && <button type="button" onClick={tiefe.onTraining} className="min-h-11 text-accent underline">{t("rep.freeTraining")}</button>}
             </div>
           )}
           <div className="mt-2 text-[11px] leading-[1.55] text-ink3">{abdeckungNote}</div>
@@ -793,13 +798,17 @@ export default function RepertoireBlatt({
    * Nachschlagen.
    */
   const tafel = karte && karte.daten.zaehlung.gesamt > 0 && (
-    <Kartentafel
-      karte={karte.daten}
-      namen={karte.namen}
-      aktiv={aktiv}
-      mobile={mobile}
-      onWaehlen={onWaehlen}
-    />
+    <>
+      <Kartentafel
+        karte={karte.daten}
+        namen={karte.namen}
+        aktiv={karte.aktiv ?? aktiv}
+        nachfahren={karte.nachfahren}
+        mobile={mobile}
+        onWaehlen={onWaehlen}
+      />
+      {karte.controls}
+    </>
   );
 
   if (mobile) {
@@ -809,7 +818,7 @@ export default function RepertoireBlatt({
         <div className="mt-3.5">{diagrammBlock}</div>
         <div className="mt-4">{rechts}</div>
         {tafel && <div className="mt-6">{tafel}</div>}
-        <div className="mt-4">{buch}</div>
+        {showVariants && <div className="mt-4">{buch}</div>}
         {pgnBereich}
       </div>
     );
@@ -837,7 +846,7 @@ export default function RepertoireBlatt({
             zwar als Ganzes: Ein Fensterrand, der erst den Abdruck und dann
             den Apparat abkoppelt, ergäbe drei Zeilen für drei Spalten. */}
         <div className="flex min-w-0 flex-auto basis-[860px] gap-8">
-          {buch}
+          {showVariants && buch}
           {diagrammBlock}
         </div>
         {rechts}
@@ -861,12 +870,14 @@ function Kartentafel({
   karte,
   namen,
   aktiv,
+  nachfahren,
   mobile,
   onWaehlen,
 }: {
   karte: Karte;
   namen: Record<string, string>;
   aktiv: string | null;
+  nachfahren?: boolean;
   mobile: boolean;
   onWaehlen: (key: string) => void;
 }) {
@@ -939,6 +950,7 @@ function Kartentafel({
           blatt
           zeilenHoehe={mobile ? 28 : 24}
           aktiv={aktiv}
+          nachfahren={nachfahren}
           namen={namen}
           zugText={zugText}
           lageText={lageText}

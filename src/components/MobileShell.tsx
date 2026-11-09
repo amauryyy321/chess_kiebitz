@@ -11,7 +11,6 @@ import { ArrowLeft, Settings as SettingsIcon, type LucideIcon } from "lucide-rea
 import { useT, type Key } from "../lib/i18n";
 import { COMPACT_LIMIT, taglineKey, taglineWidth } from "../lib/tagline";
 import type { PageId } from "../lib/nav";
-import PlanBadge from "./PlanBadge";
 import BrandMark from "./BrandMark";
 
 export interface NavItem {
@@ -95,9 +94,6 @@ export function MobileAppBar({
         <span className="font-semibold">Kiebitz</span>
         <span className="text-ink3"> · {claim}</span>
       </span>
-      {/* Welches Modell gerade gilt, gehört neben die Marke · nicht erst in die
-          Einstellungen, wo man es suchen müsste. */}
-      <PlanBadge />
       <button
         onClick={onSettings}
         data-tour="nav-settings"

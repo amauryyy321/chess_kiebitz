@@ -106,6 +106,10 @@ pub struct SyncRepNode {
     /// Wann diese Reihenfolge gesetzt wurde · die jüngere gewinnt.
     #[serde(default)]
     pub sort_ts: i64,
+    #[serde(default)]
+    pub known: bool,
+    #[serde(default)]
+    pub known_ts: i64,
 }
 
 /// Gelöschter Repertoire-Teilbaum (Löschung propagiert auf gepairte Geräte).

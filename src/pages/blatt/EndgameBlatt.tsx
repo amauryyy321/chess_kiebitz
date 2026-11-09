@@ -71,7 +71,7 @@ export interface EndgameBlattProps {
   hinweisOffen: boolean;
   onHinweis: () => void;
   /** Was mit den Tablebases anders wäre · der Satz der Seite, nicht erfunden. */
-  fussnote: string;
+  fussnote: ReactNode;
   gruppen: EndgameGruppe[];
   aktiv: string;
   gemeistert: number;

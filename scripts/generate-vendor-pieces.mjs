@@ -37,7 +37,7 @@ const PIECES = ["wP", "wN", "wB", "wR", "wQ", "wK", "bP", "bN", "bB", "bR", "bQ"
 
 /**
  * Die Sätze und woher sie stammen · dieselben Angaben stehen in
- * THIRD_PARTY_NOTICES.md und im Kopf jeder erzeugten Datei.
+ * THIRD_PARTY_CREDITS.md und im Kopf jeder erzeugten Datei.
  */
 const SETS = [
   {

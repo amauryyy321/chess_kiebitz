@@ -59,6 +59,8 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     board_signs: true,
     import_months: 3,
     puzzle_goal: 20,
+    puzzle_review_seconds: 120,
+    game_review_seconds: 120,
     puzzle_hide_theme: false,
     rep_due_limit: 20,
     rep_new_limit: 5,

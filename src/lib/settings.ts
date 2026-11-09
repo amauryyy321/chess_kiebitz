@@ -65,6 +65,8 @@ export interface Settings {
   board_signs: boolean;
   import_months: number;
   puzzle_goal: number;
+  puzzle_review_seconds: number;
+  game_review_seconds: number;
   /** Motiv der laufenden Aufgabe im Puzzle-Training verdecken. */
   puzzle_hide_theme: boolean;
   /** Fällige Repertoire-Züge je Trainingssitzung (0 = alle). */

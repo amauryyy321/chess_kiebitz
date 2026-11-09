@@ -91,6 +91,8 @@ import { de, deInt, deShort } from "../lib/format";
 import { openExternal } from "../lib/ext";
 import { evalLabel, winProb } from "../lib/evaluation";
 import { replaySans } from "../lib/position";
+import { repAddLine, repList, repMarkKnown, type RepNode } from "../lib/repertoire";
+import { confirmKnowledgeLine, confirmRepertoireLine } from "../lib/repertoireConfirm";
 import { needsChess960, VariantChess } from "../lib/chess960";
 import { plyOffset, shareHistory } from "../lib/share/notation";
 import { selectionStyles } from "../lib/boardMoves";
@@ -459,10 +461,22 @@ export default function Analysis({
   targetGameId,
   shared = null,
   line = null,
+  autoAnalyze = false,
+  puzzleReview = false,
+  reviewSeconds = 120,
+  onReviewComplete,
+  onNextPuzzle,
+  onAutoComplete,
   onPlay,
   onNewGame,
 }: {
   targetGameId: number | null;
+  autoAnalyze?: boolean;
+  puzzleReview?: boolean;
+  reviewSeconds?: number;
+  onReviewComplete?: () => void;
+  onNextPuzzle?: () => void;
+  onAutoComplete?: () => void;
   /** Stellung aus einem geteilten Link · sie eröffnet das freie Brett. */
   shared?: SharePayload | null;
   /** Eine Zugfolge ab einer Stellung · etwa die Partie gegen die Engine. */
@@ -479,6 +493,10 @@ export default function Analysis({
   const { locale, t } = useI18n();
   const storeCapture = isStoreCapture();
   const desktop = backend.mode === "desktop";
+  const autoStarted = useRef<number | null>(null);
+  const autoRunning = useRef(false);
+  const autoCompleteRef = useRef(onAutoComplete);
+  autoCompleteRef.current = onAutoComplete;
   // Telefonbreite · einige Teile der Seite stellen sich darauf um.
   const mobile = useMobileShell();
   const diagramMode = useDiagramMode();
@@ -552,6 +570,35 @@ export default function Analysis({
   const [liveBestUci, setLiveBestUci] = useState<string | null>(null);
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
   const [running, setRunning] = useState(false);
+  const [gameReviewSeconds, setGameReviewSeconds] = useState(120);
+  const [reviewUntil, setReviewUntil] = useState<number | null>(null);
+  const [reviewEngineUnavailable, setReviewEngineUnavailable] = useState(false);
+  const [reviewNow, setReviewNow] = useState(Date.now());
+  const reviewStarted = useRef<string | null>(null);
+  const reviewRemaining = reviewUntil == null ? 0 : Math.max(0, Math.ceil((reviewUntil - reviewNow) / 1000));
+  const reviewBlocked = reviewUntil != null && reviewRemaining > 0;
+  const gameReviewLocked = !reviewEngineUnavailable && !puzzleReview && selectedId != null && gameReviewSeconds > 0
+    && (reviewUntil == null || reviewBlocked);
+  useEffect(() => {
+    const id = window.setInterval(() => setReviewNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (puzzleReview && reviewUntil != null && !reviewBlocked) onReviewComplete?.();
+  }, [puzzleReview, reviewUntil, reviewBlocked, onReviewComplete]);
+  const engineStarted = () => {
+    const key = puzzleReview ? "puzzle" : selectedId == null ? null : `game:${selectedId}`;
+    if (!key || reviewStarted.current === key) return;
+    reviewStarted.current = key;
+    const seconds = puzzleReview ? reviewSeconds : gameReviewSeconds;
+    setReviewNow(Date.now());
+    setReviewUntil(Date.now() + seconds * 1000);
+  };
+  const engineUnavailable = () => {
+    setReviewEngineUnavailable(true);
+    setReviewUntil(Date.now());
+    if (puzzleReview) onReviewComplete?.();
+  };
   const [notice, setNotice] = useState<string | null>(null);
   const [posSearch, setPosSearch] = useState<PositionSearch | null>(null);
   /**
@@ -638,6 +685,7 @@ export default function Analysis({
   // gehört zu der Stellung, für die man sie gemacht hat.
   useEffect(() => {
     setFlipped(false);
+    if (!puzzleReview) setReviewUntil(null);
   }, [selectedId]);
 
   // Eine geteilte Stellung ersetzt die Auswahl: Sie gehört an das freie Brett,
@@ -665,11 +713,11 @@ export default function Analysis({
     setScratchSans(line.sans);
     setScratchSelected(null);
     setVariation(null);
-    setPly(line.sans.length);
+    setPly(puzzleReview ? 0 : line.sans.length);
     setLiveEval(null);
     setLiveBestUci(null);
     setNotice(null);
-  }, [line]);
+  }, [line, puzzleReview]);
 
   // Analyse-Events.
   useEffect(() => {
@@ -695,6 +743,10 @@ export default function Analysis({
       onAnalysisDone((p) => {
         setRunning(false);
         setProgress(null);
+        if (autoAnalyze && autoRunning.current && autoStarted.current === targetGameId) {
+          autoRunning.current = false;
+          autoCompleteRef.current?.();
+        }
         const reloaded = reloadGames();
         if (!p.error && !p.canceled && p.analyzed > 0) {
           void reloaded
@@ -719,7 +771,32 @@ export default function Analysis({
       disposed = true;
       cleanups.forEach((u) => u());
     };
-  }, [backend.info, desktop, reloadGames, t]);
+  }, [backend.info, desktop, reloadGames, t, autoAnalyze, targetGameId]);
+
+  useEffect(() => {
+    if (!desktop || !autoAnalyze || targetGameId == null || autoStarted.current === targetGameId) return;
+    autoStarted.current = targetGameId;
+    setRunning(true);
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const start = async () => {
+      try {
+        await startAnalysis({ gameIds: [targetGameId] });
+        if (!cancelled) autoRunning.current = true;
+      } catch (reason) {
+        if (cancelled) return;
+        if (String(reason).includes("Analyse läuft bereits")) {
+          retry = setTimeout(() => void start(), 2000);
+        } else {
+          setRunning(false);
+          setNotice(String(reason));
+          autoCompleteRef.current?.();
+        }
+      }
+    };
+    void start();
+    return () => { cancelled = true; if (retry) clearTimeout(retry); };
+  }, [desktop, autoAnalyze, targetGameId]);
 
   // ChessDB-Einstellung einmalig lesen.
   useEffect(() => {
@@ -734,6 +811,7 @@ export default function Analysis({
           speeds: s.explorer_speeds ?? "",
         });
         setPlayerProfile({ cc: s.cc_user ?? "", li: s.li_user ?? "", display: s.display_name ?? "" });
+        setGameReviewSeconds(s.game_review_seconds);
       })
       .catch(() => {});
   }, [desktop]);
@@ -919,6 +997,30 @@ export default function Analysis({
       : sans.slice(0, ply),
     [sans, ply, variation]
   );
+  const [repNodes, setRepNodes] = useState<RepNode[]>([]);
+  const [repSaveNotice, setRepSaveNotice] = useState("");
+  useEffect(() => { if (desktop) void repList().then(setRepNodes).catch(() => {}); }, [desktop]);
+  const repSide = shownSans.length % 2 === 1 ? "white" : "black";
+  const repPathAllowed = desktop && shownSans.length > 0 && (!openedFen || openedFen === STANDARD_START_FEN);
+  const repPathNode = useMemo(() => {
+    let parent = 0;
+    for (const san of shownSans) {
+      const next = repNodes.find((node) => node.side === repSide && node.parent_id === parent && node.san === san);
+      if (!next) return null;
+      parent = next.id;
+    }
+    return repNodes.find((node) => node.id === parent) ?? null;
+  }, [repNodes, repSide, shownSans]);
+  const saveAnalysisLine = async (known: boolean) => {
+    if (!repPathAllowed) return;
+    if (!(known ? confirmKnowledgeLine(t, shownSans) : confirmRepertoireLine(t, shownSans))) return;
+    try {
+      const id = repPathNode?.id ?? await repAddLine(repSide, "", shownSans);
+      if (known) await repMarkKnown(id);
+      setRepNodes(await repList());
+      setRepSaveNotice(known ? "Ligne ajoutée à la base de connaissance." : "Ligne ajoutée au répertoire.");
+    } catch (reason) { setRepSaveNotice(String(reason)); }
+  };
   /**
    * Stellung und der Zug, der zu ihr führte · in einem Durchgang nachgespielt,
    * weil das Brett beides zugleich zeigt.
@@ -1525,7 +1627,7 @@ export default function Analysis({
   const gameIndex = selectedId == null ? -1 : games.findIndex((g) => g.id === selectedId);
   const stepGame = (delta: number) => {
     const next = gameIndex < 0 ? games[0] : games[gameIndex + delta];
-    if (next?.id != null) setSelectedId(next.id);
+    if (next?.id != null && !gameReviewLocked) setSelectedId(next.id);
   };
   const canStepGame = (delta: number) =>
     gameIndex < 0 ? games.length > 0 && delta > 0 : games[gameIndex + delta]?.id != null;
@@ -1942,9 +2044,14 @@ export default function Analysis({
                 className="flex items-center gap-1 rounded-md bg-panel2 px-1.5 py-0.5 text-[12px] font-semibold tabular-nums"
                 style={{ color: JUDGMENT_COLOR[quality] }}
               >
-                <span aria-hidden="true">{judgmentMark(quality, 12)}</span>
-                <span className="sr-only">{judgmentLabel(t, quality)}</span>
-                {summary[quality]}
+                <button type="button" onClick={() => {
+                  const index = viewMoves.findIndex((move) => move.judgment === quality);
+                  if (index >= 0) goToPly(index + 1);
+                }} aria-label={`${judgmentLabel(t, quality)} · ${summary[quality]}`}
+                  className="flex items-center gap-1 hover:underline">
+                  <span aria-hidden="true">{judgmentMark(quality, 12)}</span>
+                  {summary[quality]}
+                </button>
               </li>
             ))}
           </ul>
@@ -2531,6 +2638,7 @@ export default function Analysis({
    */
   const boardControls = (inFocus: boolean) => {
     return (
+      <>
       <div className="ml-[calc(var(--board-gutter)-var(--board-bleed))] mt-3 flex items-center gap-2 rounded-xl border border-line bg-panel px-2 py-1.5">
         <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           <Button onClick={() => goToPly(0)} title={t("an.toStart")} label={t("an.toStart")} compact>
@@ -2567,6 +2675,14 @@ export default function Analysis({
           {liveEval?.mate != null ? `#${liveEval.mate}` : evalLabel(shownEval)}
         </div>
       </div>
+      {repPathAllowed && (
+        <div className="ml-[calc(var(--board-gutter)-var(--board-bleed))] mt-2 flex flex-wrap items-center gap-2">
+          {!repPathNode && <Button onClick={() => void saveAnalysisLine(false)}>{t("rep.addToRepertoire")}</Button>}
+          {!repPathNode?.known && <Button onClick={() => void saveAnalysisLine(true)}>{t("rep.addKnowledge")}</Button>}
+          {repSaveNotice && <span role="status" className="text-[12px] text-ink3">{repSaveNotice}</span>}
+        </div>
+      )}
+      </>
     );
   };
 
@@ -2640,7 +2756,17 @@ export default function Analysis({
     </MenuItem>
   );
 
-  const laufleiste = desktop ? (
+  const laufleiste = puzzleReview ? (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-3" role="status">
+      <span className="text-[13px] text-ink2">
+        {reviewUntil == null ? t("an.reviewStarting") : reviewBlocked
+          ? t("an.reviewCountdown", { n: reviewRemaining }) : t("an.reviewReady")}
+      </span>
+      <Button primary disabled={reviewUntil == null || reviewBlocked} onClick={onNextPuzzle}>
+        {t("an.nextPuzzle")}
+      </Button>
+    </div>
+  ) : desktop ? (
     <div
       className={
         diagramMode
@@ -2649,6 +2775,12 @@ export default function Analysis({
       }
       data-tour="analysis-run"
     >
+      {selectedId != null && gameReviewSeconds > 0 && (
+        <span role="status" className="w-full text-[12px] text-ink3">
+          {reviewUntil == null ? t("an.reviewStarting") : reviewBlocked
+            ? t("an.reviewCountdown", { n: reviewRemaining }) : t("an.reviewReady")}
+        </span>
+      )}
       {/* Links steht, welche Partie gezeigt wird · Auswahlliste und die
           beiden Pfeile, die in ihr weiterblättern, gehören zusammen und
           stehen deshalb in einer Gruppe.
@@ -2662,7 +2794,8 @@ export default function Analysis({
       <div className="flex w-full min-w-0 basis-full items-center gap-1.5 sm:w-auto sm:flex-1 sm:basis-0">
         <select
           value={selectedId ?? ""}
-          onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
+          onChange={(e) => { if (!gameReviewLocked) setSelectedId(e.target.value ? Number(e.target.value) : null); }}
+          disabled={gameReviewLocked}
           className="min-w-0 max-w-[380px] flex-1 rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[12.5px] text-ink focus:border-accent-dim focus:outline-none"
         >
           <option value="">{t("an.freeBoard")}</option>
@@ -2675,7 +2808,7 @@ export default function Analysis({
         </select>
         <Button
           onClick={() => stepGame(-1)}
-          disabled={!canStepGame(-1)}
+          disabled={!canStepGame(-1) || gameReviewLocked}
           title={t("an.prevGame")}
           label={t("an.prevGame")}
           className="shrink-0"
@@ -2685,7 +2818,7 @@ export default function Analysis({
         </Button>
         <Button
           onClick={() => stepGame(1)}
-          disabled={!canStepGame(1)}
+          disabled={!canStepGame(1) || gameReviewLocked}
           title={t("an.nextGame")}
           label={t("an.nextGame")}
           className="shrink-0"
@@ -2858,6 +2991,8 @@ export default function Analysis({
             <LiveEngine
               blatt
               fen={fen}
+              onStarted={engineStarted}
+              onUnavailable={engineUnavailable}
               demoLines={scratch || loadingGame ? [] : featuredGame.pvLines}
               onEval={(cp, mate) => setLiveEval({ cp, mate })}
               onBestMove={setLiveBestUci}
@@ -3370,6 +3505,8 @@ export default function Analysis({
         <div className="flex min-w-0 flex-col gap-4 min-[1100px]:contents">
           <LiveEngine
             fen={fen}
+            onStarted={engineStarted}
+            onUnavailable={engineUnavailable}
             demoLines={scratch || loadingGame ? [] : featuredGame.pvLines}
             onEval={(cp, mate) => setLiveEval({ cp, mate })}
             onBestMove={setLiveBestUci}

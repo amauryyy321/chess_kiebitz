@@ -133,7 +133,7 @@ fn open_reader(path: &Path) -> Result<Connection, String> {
 
 /// Current SQLite schema version. It is stored only after the complete
 /// migration has committed successfully.
-const SCHEMA_VERSION: i64 = 23;
+const SCHEMA_VERSION: i64 = 24;
 
 /// Vorgabe der Variantenspalte · ein Datensatz ohne Angabe ist Standardschach.
 fn standard_variant() -> String {
@@ -530,6 +530,8 @@ pub struct GamePageRequest {
     pub eco: String,
     #[serde(default)]
     pub query: String,
+    #[serde(default)]
+    pub sort_by: String,
 }
 
 #[derive(Serialize)]
@@ -913,6 +915,11 @@ fn migrate_to_current(conn: &Connection) -> Result<(), String> {
         // Reihenfolge die jüngere ist.
         ("rep_nodes", "sort_order", "INTEGER NOT NULL DEFAULT 0"),
         ("rep_nodes", "sort_ts", "INTEGER NOT NULL DEFAULT 0"),
+        // A manually confirmed line stays in the shared move tree, but is no
+        // longer part of spaced repetition. Prefixes can be shared with lines
+        // that still need training.
+        ("rep_nodes", "known", "INTEGER NOT NULL DEFAULT 0"),
+        ("rep_nodes", "known_ts", "INTEGER NOT NULL DEFAULT 0"),
     ] {
         add_column_if_missing(conn, table, column, definition)?;
     }
@@ -1938,9 +1945,14 @@ pub fn list_games_page(conn: &Connection, request: &GamePageRequest) -> Result<G
     let library_total = conn
         .query_row("SELECT COUNT(*) FROM games", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
+    let order_by = match request.sort_by.as_str() {
+        "accuracy_asc" => "accuracy IS NULL ASC, accuracy ASC, played_ts DESC, played_at DESC, id DESC",
+        "accuracy_desc" => "accuracy IS NULL ASC, accuracy DESC, played_ts DESC, played_at DESC, id DESC",
+        _ => "played_ts DESC, played_at DESC, id DESC",
+    };
     let sql = format!(
         "SELECT {GAME_SUMMARY_COLUMNS} FROM games {WHERE}
-         ORDER BY played_ts DESC, played_at DESC, id DESC LIMIT ?13 OFFSET ?14"
+         ORDER BY {order_by} LIMIT ?13 OFFSET ?14"
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
@@ -2508,6 +2520,33 @@ mod tests {
         assert!(column_exists(&conn, "move_evals", "signs").unwrap());
         assert!(column_exists(&conn, "move_evals", "signs_version").unwrap());
         assert!(column_exists(&conn, "games", "end_signs").unwrap());
+    }
+
+    #[test]
+    fn init_adds_knowledge_columns_to_a_v23_database_without_losing_repertoire() {
+        let conn = Connection::open_in_memory().unwrap();
+        init(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO rep_nodes (side, san, fen_key, depth) VALUES ('white', 'e4', 'test', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE rep_nodes DROP COLUMN known;
+             ALTER TABLE rep_nodes DROP COLUMN known_ts;
+             PRAGMA user_version = 23;",
+        )
+        .unwrap();
+
+        init(&conn).unwrap();
+
+        assert!(column_exists(&conn, "rep_nodes", "known").unwrap());
+        assert!(column_exists(&conn, "rep_nodes", "known_ts").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM rep_nodes WHERE san = 'e4'", [], |row| row.get::<_, i64>(0)).unwrap(),
+            1
+        );
+        assert_eq!(conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 24);
     }
 
     #[test]

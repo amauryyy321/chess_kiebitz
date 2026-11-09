@@ -1,52 +1,9 @@
 /**
- * Deep Links der App.
- *
- * Der Magic-Link im Postfach führt auf die API; die bestätigt die Anmeldung und
- * bietet `kiebitz://auth?code=…` an. Das Betriebssystem gibt diese URL an die
- * laufende oder gerade startende App weiter, hier wird der Einmalcode daraus
- * gelöst und gegen eine Sitzung getauscht.
- *
- * Der Code ist fünf Minuten gültig und nur einmal verwendbar; er landet
- * deshalb nirgends in einem Log.
- *
- * Dieselbe Schema-Registrierung trägt zwei weitere Ziele: `kiebitz://open?page=…`
- * aus den Android-Widgets und `kiebitz://p/…` aus einer geteilten Stellung.
+ * Deep Links für Android-Widgets und geteilte Stellungen.
  */
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { firstSharePayload } from "../share/link";
 import type { SharePayload } from "../share/codec";
-import { signInWithCode } from "./store";
-
-/**
- * Einmalcode aus einer Deep-Link-URL.
- *
- * Nur `kiebitz://auth` zählt · dieselbe Schema-Registrierung trägt auch die
- * Pairing-URL des Gerätesyncs, und die hat mit dem Konto nichts zu tun.
- */
-export function parseAuthDeepLink(raw: string): string | null {
-  const value = raw.trim();
-  // Der Schrägstrich ist nicht optional aus Höflichkeit: Chromium kanonisiert
-  // `kiebitz://auth?code=…` zu `kiebitz://auth/?code=…`, bevor Windows die URL
-  // an die App reicht. Ohne diese Toleranz verwirft der Parser jeden Link, der
-  // aus einem Browser kommt · und das sind alle aus der E-Mail.
-  if (!/^kiebitz:\/\/auth\/?(\?|$)/i.test(value)) return null;
-  const query = value.slice(value.indexOf("?") + 1);
-  if (!value.includes("?")) return null;
-  const code = new URLSearchParams(query).get("code");
-  if (!code) return null;
-  const trimmed = code.trim();
-  // Die API vergibt einen Base64url-Token; alles andere ist kein Code von uns.
-  return /^[A-Za-z0-9_-]{16,256}$/.test(trimmed) ? trimmed : null;
-}
-
-/** Erster passender Code aus einer Liste von URLs. */
-export function firstAuthCode(urls: readonly string[] | null | undefined): string | null {
-  for (const url of urls ?? []) {
-    const code = parseAuthDeepLink(url);
-    if (code) return code;
-  }
-  return null;
-}
 
 /** Seiten, die ein Deep Link ansteuern darf · dieselben Ziele wie die Navigation. */
 const OPEN_PAGES = [
@@ -71,7 +28,7 @@ export type OpenPage = (typeof OPEN_PAGES)[number];
  */
 export function parseOpenDeepLink(raw: string): OpenPage | null {
   const value = raw.trim();
-  // Auch hier der kanonisierte Schrägstrich · siehe parseAuthDeepLink.
+  // Chromium kanonisiert `kiebitz://open?page=…` zu `kiebitz://open/?page=…`.
   if (!/^kiebitz:\/\/open\/?\?/i.test(value)) return null;
   const page = new URLSearchParams(value.slice(value.indexOf("?") + 1)).get("page");
   return (OPEN_PAGES as readonly string[]).includes(page ?? "") ? (page as OpenPage) : null;
@@ -86,10 +43,6 @@ export function firstOpenPage(urls: readonly string[] | null | undefined): OpenP
 }
 
 export interface DeepLinkHandlers {
-  /** Der Code wurde angenommen und die Sitzung steht. */
-  onSignedIn?: () => void;
-  /** Der Code war abgelaufen, schon benutzt oder die API nicht erreichbar. */
-  onError?: (error: unknown) => void;
   /** Ein Widget hat eine Seite angefordert. */
   onOpenPage?: (page: OpenPage) => void;
   /** Jemand hat eine geteilte Stellung geöffnet (`kiebitz://p/…`). */
@@ -104,19 +57,8 @@ export function installDeepLinks(handlers: DeepLinkHandlers = {}): () => void {
   let disposed = false;
   let unlisten: (() => void) | null = null;
 
-  const redeem = async (code: string) => {
-    try {
-      await signInWithCode(code);
-      if (!disposed) handlers.onSignedIn?.();
-    } catch (error) {
-      if (!disposed) handlers.onError?.(error);
-    }
-  };
-
   const handle = (urls: readonly string[] | null | undefined) => {
     if (disposed) return;
-    const code = firstAuthCode(urls);
-    if (code) void redeem(code);
     const page = firstOpenPage(urls);
     if (page) handlers.onOpenPage?.(page);
     const shared = firstSharePayload(urls);

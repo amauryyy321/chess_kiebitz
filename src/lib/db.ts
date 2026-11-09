@@ -90,6 +90,8 @@ export interface GamePageRequest {
   /** ECO-Kennung; leer heisst: alle. */
   eco?: string;
   query?: string;
+  /** Sortie de la liste: date recente ou precision croissante/decroissante. */
+  sort_by?: "recent" | "accuracy_asc" | "accuracy_desc";
 }
 
 export interface GamePage {
@@ -232,6 +234,10 @@ export function getGame(id: number): Promise<GameRecord> {
     });
   }
   return request;
+}
+
+export function gameIdBySource(source: string, sourceId: string): Promise<number | null> {
+  return invoke<number | null>("game_id_by_source", { source, sourceId });
 }
 
 export function listGamesPage(request: GamePageRequest): Promise<GamePage> {

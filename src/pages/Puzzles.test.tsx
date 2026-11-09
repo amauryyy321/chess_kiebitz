@@ -90,7 +90,7 @@ describe("Puzzle training", () => {
    * Die Theorie zum Motiv liegt verdeckt, und die Lösung in Worten erscheint
    * erst, wenn die Aufgabe vorbei ist · vorher wäre sie die Antwort.
    */
-  it("keeps the motif theory covered and explains the solution only afterwards", async () => {
+  it("keeps motif theory covered and hides direct hint and solution actions", async () => {
     render(<LocaleProvider><Puzzles /></LocaleProvider>);
     const board = await screen.findByTestId("puzzle-board");
     await waitFor(() => expect(board.dataset.draggable).toBe("true"));
@@ -107,10 +107,8 @@ describe("Puzzle training", () => {
     // wird die sichtbare.
     await waitFor(() => expect(document.querySelector('[data-action-row="wrong"][data-active]')).toBeTruthy());
     const zeile = document.querySelector('[data-action-row="wrong"][data-active]')!;
-    const loesen = [...zeile.querySelectorAll("button")].find((knopf) => /Lösung/.test(knopf.textContent ?? ""))!;
-    fireEvent.click(loesen);
-    expect(await screen.findByText("Die Lösung", {}, { timeout: 5000 })).toBeTruthy();
-    expect(screen.getByText("1.e4 e5 2.Nf3 Nc6")).toBeTruthy();
+    expect([...zeile.querySelectorAll("button")].some((knopf) => /Tipp|Lösung/.test(knopf.textContent ?? ""))).toBe(false);
+    expect(screen.queryByText("Die Lösung")).toBeNull();
   }, 15_000);
 
   it("navigates through played positions with buttons and arrow keys", async () => {
@@ -260,28 +258,37 @@ describe("Puzzle training", () => {
     await waitFor(() => expect(brett.dataset.draggable).toBe("true"));
   };
 
-  it("books a hint as a failed attempt, before the move that follows it", async () => {
+  it("books the first wrong move once", async () => {
     render(<LocaleProvider><Puzzles /></LocaleProvider>);
     await bereit();
 
-    fireEvent.click(griff("Tipp"));
-    // Der Versuch ist mit der Hilfe entschieden · gebucht wird sofort und
-    // nicht erst, wenn der Zug danach kommt.
+    fireEvent.click(griff("play a3"));
     await waitFor(() => expect(mocks.recordAttempt).toHaveBeenCalledWith("test-puzzle", false));
 
     fireEvent.click(griff("play e4"));
-    // Der richtige Zug danach bucht nichts nach und macht aus dem Versuch
-    // keinen gelösten.
     expect(mocks.recordAttempt).toHaveBeenCalledTimes(1);
     expect(mocks.recordAttempt).not.toHaveBeenCalledWith("test-puzzle", true);
   });
 
-  it("books the revealed solution too, instead of counting nothing at all", async () => {
-    render(<LocaleProvider><Puzzles /></LocaleProvider>);
+  it("opens analysis from the first wrong move with the solution line", async () => {
+    const openAnalysis = vi.fn();
+    mocks.getSettings.mockResolvedValue({ locale: "de", puzzle_goal: 10, puzzle_hide_theme: false, puzzle_review_seconds: 120 });
+    render(<LocaleProvider><Puzzles openAnalysis={openAnalysis} /></LocaleProvider>);
     await bereit();
 
-    fireEvent.click(griff("Lösung"));
+    fireEvent.click(griff("play a3"));
     await waitFor(() => expect(mocks.recordAttempt).toHaveBeenCalledWith("test-puzzle", false));
+    expect(openAnalysis).toHaveBeenCalledWith({ fen: initialFen, sans: ["e4", "e5", "Nf3", "Nc6"], chess960: false }, true, 120);
+  });
+
+  it("keeps analysis closed after a wrong move when review is set to zero", async () => {
+    const openAnalysis = vi.fn();
+    mocks.getSettings.mockResolvedValue({ locale: "de", puzzle_goal: 10, puzzle_hide_theme: false, puzzle_review_seconds: 0 });
+    render(<LocaleProvider><Puzzles openAnalysis={openAnalysis} /></LocaleProvider>);
+    await bereit();
+    fireEvent.click(griff("play a3"));
+    await waitFor(() => expect(mocks.recordAttempt).toHaveBeenCalledWith("test-puzzle", false));
+    expect(openAnalysis).not.toHaveBeenCalled();
   });
 
   it("leaves a puzzle solved without help at full value", async () => {

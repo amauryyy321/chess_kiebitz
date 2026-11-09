@@ -24,7 +24,7 @@
  *
  * Geschrieben, nicht übernommen: Der Datensatz von lichess liefert Namen und
  * keine Texte, und Wikipedia steht unter CC-BY-SA. Deshalb stehen hier eigene
- * Sätze, und `THIRD_PARTY_NOTICES.md` bleibt davon unberührt.
+ * Sätze, und `THIRD_PARTY_CREDITS.md` bleibt davon unberührt.
  */
 import type { LokalText } from "../lib/localText";
 

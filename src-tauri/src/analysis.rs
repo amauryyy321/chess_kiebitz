@@ -1334,7 +1334,7 @@ pub fn error_stats(db: State<db::Db>) -> Result<Vec<PhaseErrors>, String> {
             .prepare(
                 "SELECT e.phase, e.judgment, COUNT(*) FROM move_evals e
                  JOIN games g ON g.id = e.game_id
-                 WHERE e.judgment != '' AND g.analysis_excluded = 0
+                 WHERE e.judgment != '' AND g.analysis_excluded = 0 AND g.time_class NOT LIKE 'bullet%'
                    AND ((g.color = 'white' AND e.ply % 2 = 1) OR (g.color = 'black' AND e.ply % 2 = 0))
                  GROUP BY e.phase, e.judgment",
             )

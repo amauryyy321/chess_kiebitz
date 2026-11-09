@@ -3,7 +3,7 @@
 //! Elo-basiertes Puzzle-Rating über alle Versuche.
 
 use crate::db;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -658,6 +658,22 @@ pub async fn next_puzzle(
     })
     .await
     .map_err(|e| format!("Puzzle-Auswahl fehlgeschlagen: {e}"))?
+}
+
+#[tauri::command]
+pub async fn puzzle_by_id(app: tauri::AppHandle, id: String) -> Result<Option<PuzzleOut>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<db::Db>();
+        db.read(|conn| {
+            conn.query_row(
+                "SELECT id, fen, moves, rating, themes, source, source_game_id, setup_plies FROM puzzles WHERE id = ?1",
+                [&id],
+                map_puzzle,
+            ).optional().map_err(|e| e.to_string())
+        })
+    })
+    .await
+    .map_err(|e| format!("Puzzle introuvable: {e}"))?
 }
 
 /// Nach dieser Zeit darf eine gelöste Aufgabe wieder drankommen · Taktik will

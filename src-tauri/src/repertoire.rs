@@ -96,6 +96,7 @@ pub struct RepNodeOut {
     pub stability: f64,
     /// Selbst gewählte Position in der Variantenliste · 0 = nie sortiert.
     pub sort_order: i64,
+    pub known: bool,
     /// True, wenn dieser Zug von mir zu spielen ist (trainierbar).
     pub my_move: bool,
 }
@@ -119,7 +120,7 @@ pub(crate) fn load_nodes(conn: &Connection) -> Result<Vec<RepNodeOut>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, parent_id, side, san, name, depth, reps, lapses, due_ts, stability,
-                    note, fen_key, sort_order
+                    note, fen_key, sort_order, known
              FROM rep_nodes ORDER BY depth, id",
         )
         .map_err(|e| e.to_string())?;
@@ -142,6 +143,7 @@ pub(crate) fn load_nodes(conn: &Connection) -> Result<Vec<RepNodeOut>, String> {
                 note: r.get(10)?,
                 fen_key: r.get(11)?,
                 sort_order: r.get(12)?,
+                known: r.get::<_, i64>(13)? != 0,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -152,6 +154,87 @@ pub(crate) fn load_nodes(conn: &Connection) -> Result<Vec<RepNodeOut>, String> {
 #[tauri::command(async)]
 pub fn rep_list(db: State<db::Db>) -> Result<Vec<RepNodeOut>, String> {
     db.read(load_nodes)
+}
+
+/// Marks a whole path as known, optionally including every descendant of its
+/// endpoint. The move tree remains intact so shared prefixes are stored once.
+#[tauri::command(async)]
+pub fn rep_mark_known(db: State<db::Db>, node_id: i64, descendants: bool) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    mark_known(&conn, node_id, descendants, next_known_ts(&conn)?)
+}
+
+/// Removes a known terminal line from the knowledge base. Shared prefixes
+/// remain known while another known branch still uses them.
+#[tauri::command(async)]
+pub fn rep_unmark_known(db: State<db::Db>, node_id: i64, descendants: bool) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    unmark_known(&tx, node_id, descendants, next_known_ts(&tx)?)?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
+fn next_known_ts(conn: &Connection) -> Result<i64, String> {
+    let last: i64 = conn.query_row("SELECT COALESCE(MAX(known_ts), 0) FROM rep_nodes", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(now_ts().max(last + 1))
+}
+
+fn unmark_known(conn: &Connection, node_id: i64, descendants: bool, timestamp: i64) -> Result<(), String> {
+    let parent: i64 = conn.query_row(
+        "SELECT parent_id FROM rep_nodes WHERE id = ?1", [node_id], |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+    let has_known_child: i64 = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM rep_nodes WHERE parent_id = ?1 AND known = 1)",
+        [node_id], |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+    if has_known_child != 0 && !descendants { return Err("Choisis une ligne finale de la base de connaissance".into()); }
+    conn.execute(
+        "WITH RECURSIVE branch(id) AS (
+           SELECT id FROM rep_nodes WHERE id = ?1
+           UNION ALL SELECT n.id FROM rep_nodes n JOIN branch b ON n.parent_id = b.id
+         )
+         UPDATE rep_nodes SET known = 0, known_ts = ?2
+         WHERE known = 1 AND id IN (SELECT id FROM branch)",
+        params![node_id, timestamp],
+    ).map_err(|e| e.to_string())?;
+    let mut current = parent;
+    loop {
+        if current == 0 { break; }
+        let shared: i64 = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM rep_nodes WHERE parent_id = ?1 AND known = 1)",
+            [current], |row| row.get(0),
+        ).map_err(|e| e.to_string())?;
+        if shared != 0 { break; }
+        let (parent, known): (i64, i64) = conn.query_row(
+            "SELECT parent_id, known FROM rep_nodes WHERE id = ?1", [current],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(|e| e.to_string())?;
+        if known == 0 { break; }
+        conn.execute(
+            "UPDATE rep_nodes SET known = 0, known_ts = ?2 WHERE id = ?1",
+            params![current, timestamp],
+        ).map_err(|e| e.to_string())?;
+        current = parent;
+    }
+    Ok(())
+}
+
+fn mark_known(conn: &Connection, node_id: i64, descendants: bool, timestamp: i64) -> Result<(), String> {
+    let exists: i64 = conn.query_row("SELECT COUNT(*) FROM rep_nodes WHERE id = ?1", [node_id], |r| r.get(0)).map_err(|e| e.to_string())?;
+    if exists == 0 { return Err("Ligne introuvable".into()); }
+    conn.execute(
+        "WITH RECURSIVE path(id, parent_id) AS (
+           SELECT id, parent_id FROM rep_nodes WHERE id = ?1
+           UNION ALL SELECT n.id, n.parent_id FROM rep_nodes n JOIN path p ON n.id = p.parent_id
+         ), branch(id) AS (
+           SELECT id FROM rep_nodes WHERE id = ?1 AND ?2 = 1
+           UNION ALL SELECT n.id FROM rep_nodes n JOIN branch b ON n.parent_id = b.id
+         )
+         UPDATE rep_nodes SET known = 1, known_ts = ?3 WHERE id IN (SELECT id FROM path UNION SELECT id FROM branch)",
+        params![node_id, if descendants { 1 } else { 0 }, timestamp],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Reihenfolge der Varianten einer Seite festschreiben.
@@ -552,7 +635,7 @@ pub fn rep_due(
 
         let mut due: Vec<(&RepNodeOut, bool)> = nodes
             .iter()
-            .filter(|n| n.my_move && (n.reps == 0 || n.due_ts <= now))
+            .filter(|n| n.my_move && !n.known && (n.reps == 0 || n.due_ts <= now))
             .map(|n| (n, n.reps == 0))
             .collect();
         // Fällige zuerst (älteste zuerst), neue danach.
@@ -833,10 +916,10 @@ pub fn rep_stats(
     db.read(|conn| {
         let nodes = load_nodes(conn)?;
         let now = now_ts();
-        let my_positions = nodes.iter().filter(|n| n.my_move).count() as i64;
+        let my_positions = nodes.iter().filter(|n| n.my_move && !n.known).count() as i64;
         let due_now = nodes
             .iter()
-            .filter(|n| n.my_move && (n.reps == 0 || n.due_ts <= now))
+            .filter(|n| n.my_move && !n.known && (n.reps == 0 || n.due_ts <= now))
             .count() as i64;
 
         let depth = clamp_plies(plies);
@@ -1084,6 +1167,51 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         db::init(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn known_path_keeps_shared_branch_untrained() {
+        let conn = memory_db();
+        let (learned, _) = insert_line(&conn, "white", "Known", &line(&["e4", "e5", "Nf3"])).unwrap();
+        let (child, _) = insert_line(&conn, "white", "Child", &line(&["e4", "e5", "Nf3", "Nc6"])).unwrap();
+        let (other, _) = insert_line(&conn, "white", "Learning", &line(&["e4", "e5", "Bc4"])).unwrap();
+        mark_known(&conn, learned, false, 123).unwrap();
+        let nodes = load_nodes(&conn).unwrap();
+        assert!(nodes.iter().find(|n| n.id == learned).unwrap().known);
+        assert!(!nodes.iter().find(|n| n.id == other).unwrap().known);
+        assert!(!nodes.iter().find(|n| n.id == child).unwrap().known);
+        assert!(nodes.iter().find(|n| n.san == "e4" && n.side == "white").unwrap().known);
+        mark_known(&conn, learned, true, 124).unwrap();
+        assert!(load_nodes(&conn).unwrap().iter().find(|n| n.id == child).unwrap().known);
+        assert!(!load_nodes(&conn).unwrap().iter().find(|n| n.id == other).unwrap().known);
+    }
+
+    #[test]
+    fn removing_known_line_keeps_shared_prefix_and_other_branch() {
+        let conn = memory_db();
+        let (first, _) = insert_line(&conn, "white", "First", &line(&["e4", "e5", "Nf3"])).unwrap();
+        let (other, _) = insert_line(&conn, "white", "Other", &line(&["e4", "e5", "Bc4"])).unwrap();
+        mark_known(&conn, first, false, 123).unwrap();
+        mark_known(&conn, other, false, 124).unwrap();
+        unmark_known(&conn, first, false, 125).unwrap();
+        let nodes = load_nodes(&conn).unwrap();
+        assert!(!nodes.iter().find(|n| n.id == first).unwrap().known);
+        assert!(nodes.iter().find(|n| n.id == other).unwrap().known);
+        assert!(nodes.iter().find(|n| n.san == "e4").unwrap().known);
+        assert_eq!(conn.query_row("SELECT known_ts FROM rep_nodes WHERE id = ?1", [first], |r| r.get::<_, i64>(0)).unwrap(), 125);
+    }
+
+    #[test]
+    fn removing_known_branch_returns_all_children_to_repertoire() {
+        let conn = memory_db();
+        let (first, _) = insert_line(&conn, "white", "First", &line(&["e4", "e5", "Nf3"])).unwrap();
+        let (second, _) = insert_line(&conn, "white", "Second", &line(&["e4", "e5", "Bc4"])).unwrap();
+        mark_known(&conn, first, false, 123).unwrap();
+        mark_known(&conn, second, false, 124).unwrap();
+        let shared = conn.query_row("SELECT id FROM rep_nodes WHERE san = 'e5'", [], |r| r.get::<_, i64>(0)).unwrap();
+        unmark_known(&conn, shared, true, 125).unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM rep_nodes WHERE known = 1", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM rep_nodes", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
     }
 
     fn line(sans: &[&str]) -> Vec<String> {

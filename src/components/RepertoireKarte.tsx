@@ -249,6 +249,8 @@ export interface KartenBildProps {
   zeilenHoehe: number;
   blatt: boolean;
   aktiv: string | null;
+  /** Include every branch below the selected move in the visible selection. */
+  nachfahren?: boolean;
   /** Der volle Name einer Variante, wie in der Liste · für Vorlesen und Tooltip. */
   namen: Record<string, string>;
   /** Wie ein Zug auf der Karte heißt · im Blatt in der Sprache der Oberfläche. */
@@ -269,6 +271,7 @@ export function KartenBild({
   zeilenHoehe,
   blatt,
   aktiv,
+  nachfahren = false,
   namen,
   zugText,
   lageText,
@@ -301,6 +304,15 @@ export function KartenBild({
     }
     return pfad;
   }, [aktiv, ortVon, teil.orte]);
+  const ausgewaehlteOrte = useMemo(() => {
+    if (!nachfahren || aktivPfad.length === 0) return aktivPfad;
+    const descendants = new Set([aktivPfad[aktivPfad.length - 1].id]);
+    for (const ort of teil.orte) {
+      if (descendants.has(ort.parentId)) descendants.add(ort.id);
+    }
+    const ids = new Set([...aktivPfad.map((ort) => ort.id), ...descendants]);
+    return teil.orte.filter((ort) => ids.has(ort.id));
+  }, [aktivPfad, nachfahren, teil.orte]);
 
   const vonPunkt = (ort: KartenOrt): [number, number] => {
     const parent = ort.parentId ? ortVon.get(ort.parentId) : undefined;
@@ -496,7 +508,7 @@ export function KartenBild({
             <path
               key={ort.id}
               d={wegPfad(x1, y1, m.x(ort), m.y(ort))}
-              style={{ stroke: stil.farbe }}
+              style={{ stroke: ort.known ? "#8b5cf6" : stil.farbe }}
               strokeWidth={stil.breite}
               strokeDasharray={stil.strich}
             />
@@ -624,15 +636,16 @@ export function KartenBild({
       </g>
 
       {/* Der gewählte Weg · über dem Nebel, weil man ihn gerade selbst geht. */}
-      {aktivPfad.length > 0 && (
-        <g fill="none" strokeLinecap="round" pointerEvents="none">
-          {aktivPfad.map((ort) => {
+      {ausgewaehlteOrte.length > 0 && (
+        <g fill="none" strokeLinecap="round" pointerEvents="none"
+          data-testid="repertoire-map-selection" data-node-ids={ausgewaehlteOrte.map((ort) => ort.id).join(",")}>
+          {ausgewaehlteOrte.map((ort) => {
             const [x1, y1] = vonPunkt(ort);
             return (
               <path
                 key={ort.id}
                 d={wegPfad(x1, y1, m.x(ort), m.y(ort))}
-                style={{ stroke: blatt ? "var(--color-ink)" : "var(--color-accent-hover)" }}
+                style={{ stroke: ort.known ? "#8b5cf6" : blatt ? "var(--color-ink)" : "var(--color-accent-hover)" }}
                 strokeWidth={blatt ? 2.4 : 3}
                 strokeDasharray={ort.lage === "nebel" ? (blatt ? "4 3" : "5 4") : undefined}
               />
@@ -701,6 +714,7 @@ export function KartenBild({
 
 /** Ein Ort auf der Karte · eigener Zug, Gegnerzug oder Endpunkt. */
 function Ortszeichen({ ort, x, y, blatt }: { ort: KartenOrt; x: number; y: number; blatt: boolean }) {
+  if (ort.known) return <circle cx={x} cy={y} r={ort.endpunkt ? 5 : 3.2} style={{ fill: "#8b5cf6" }} pointerEvents="none" />;
   if (blatt) {
     // Gestochen: gefüllt, was sitzt, offen, was noch nicht · der Endpunkt ist
     // ein doppelter Kreis, wie eine Stadt auf der Karte.
@@ -772,6 +786,8 @@ function useBreite(vorgabe: number) {
 export interface KartenTafelnProps
   extends Omit<KartenBildProps, "teil" | "breite" | "titel" | "frisch" | "offen"> {
   karte: Karte;
+  /** The selected move keeps its tree visible; the opposite column shows its board. */
+  oppositeBoard?: { selectedSide: "white" | "black"; content: ReactNode };
   /** Überschrift je Teil · „Als Weiß", „Als Schwarz". */
   teilTitel: (seite: "white" | "black") => string;
   /** Was neben der Überschrift steht · etwa „5 / 12". */
@@ -788,14 +804,21 @@ export interface KartenTafelnProps
  * sehen. Unter 420 Punkten blieben für die Wege aber nur noch ein paar Punkte
  * je Halbzug · dann lieber zwei Karten übereinander, jede in voller Breite.
  */
-export function KartenTafeln({ karte, teilTitel, teilZahl, blatt, ...bild }: KartenTafelnProps) {
+export function KartenTafeln({ karte, oppositeBoard, teilTitel, teilZahl, blatt, ...bild }: KartenTafelnProps) {
   const { ref, breite } = useBreite(640);
-  const nebeneinander = karte.teile.length > 1 && breite >= 2 * 420 + 24;
+  const sides = oppositeBoard && karte.teile.length === 1
+    ? (["white", "black"] as const)
+    : karte.teile.map((teil) => teil.seite);
+  const nebeneinander = sides.length > 1 && breite >= 2 * 420 + 24;
   const spalte = nebeneinander ? Math.floor((breite - 24) / 2) : breite;
   return (
     <div ref={ref} className={nebeneinander ? "grid grid-cols-2 gap-6" : "flex flex-col gap-5"}>
-      {karte.teile.map((teil) => (
-        <figure key={teil.seite} className="m-0 min-w-0">
+      {sides.map((side) => {
+        const teil = karte.teile.find((candidate) => candidate.seite === side);
+        const boardHere = oppositeBoard?.selectedSide !== side && oppositeBoard != null;
+        if (!teil && !boardHere) return null;
+        return <figure key={side} className="m-0 min-w-0">
+          {boardHere ? oppositeBoard.content : teil && <>
           <figcaption
             className={
               blatt
@@ -831,8 +854,9 @@ export function KartenTafeln({ karte, teilTitel, teilZahl, blatt, ...bild }: Kar
               />
             </div>
           </div>
-        </figure>
-      ))}
+          </>}
+        </figure>;
+      })}
     </div>
   );
 }
@@ -853,15 +877,19 @@ export function zugAufDerKarte(san: string, tiefe: number): string {
 export default function RepertoireKarteKarte({
   karte,
   aktiv,
+  nachfahren,
   namen,
   compact,
   onWaehlen,
+  oppositeBoard,
 }: {
   karte: Karte;
   aktiv: string | null;
+  nachfahren?: boolean;
   namen: Record<string, string>;
   compact: boolean;
   onWaehlen?: (key: string) => void;
+  oppositeBoard?: { selectedSide: "white" | "black"; content: ReactNode };
 }) {
   const t = useT();
   const { frisch, offen } = useAufdecken(karte);
@@ -938,9 +966,11 @@ export default function RepertoireKarteKarte({
       <div className="mt-4">
         <KartenTafeln
           karte={karte}
+          oppositeBoard={oppositeBoard}
           blatt={false}
           zeilenHoehe={compact ? 28 : 22}
           aktiv={aktiv}
+          nachfahren={nachfahren}
           namen={namen}
           zugText={zugAufDerKarte}
           lageText={lageText}

@@ -136,7 +136,7 @@ Notes:
   source commit, official binary URLs and their
   SHA-256 hashes, plus a **written offer for the corresponding source** (GPL-3.0
   §6); `COPYING.txt` contains the complete GPL-3.0. Both files are bundled on
-  desktop and Android and are also referenced by `THIRD_PARTY_NOTICES.md`. CI
+  desktop and Android and are also referenced by `THIRD_PARTY_LICENSES.md`. CI
   verifies the pinned Stockfish source, binaries and NNUE networks, and a
   separate `stockfish-source` job attaches the engine's source archive to every
   release (see below). Stockfish upgrades change the pins once and then run

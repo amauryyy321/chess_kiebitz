@@ -98,6 +98,10 @@ pub struct Settings {
     pub import_months: u32,
     /// Puzzle-Tagesziel (Versuche pro Tag) für Dashboard und Lernplan.
     pub puzzle_goal: u32,
+    /// Review time after a failed puzzle; zero skips the analysis detour.
+    pub puzzle_review_seconds: u32,
+    /// Review time after starting a game analysis.
+    pub game_review_seconds: u32,
     /// Motiv der laufenden Aufgabe im Puzzle-Training verdecken. Der Hinweis
     /// („Grundreihenmatt“) nimmt einen Teil der Aufgabe vorweg; wer das nicht
     /// will, blendet ihn aus. Ab Werk bleibt er sichtbar.
@@ -290,6 +294,8 @@ impl Default for Settings {
             board_signs: true,
             import_months: 3,
             puzzle_goal: 20,
+            puzzle_review_seconds: 120,
+            game_review_seconds: 120,
             puzzle_hide_theme: false,
             rep_due_limit: 20,
             rep_new_limit: 5,
@@ -438,6 +444,8 @@ fn normalize(mut s: Settings) -> Settings {
     s.engine_threads = s.engine_threads.min(128);
     s.import_months = s.import_months.clamp(1, 240);
     s.puzzle_goal = s.puzzle_goal.clamp(1, 200);
+    s.puzzle_review_seconds = s.puzzle_review_seconds.min(3600);
+    s.game_review_seconds = s.game_review_seconds.min(3600);
     s.rep_due_limit = s.rep_due_limit.min(500);
     s.rep_new_limit = s.rep_new_limit.min(500);
     s.sound_volume = s.sound_volume.min(100);

@@ -16,16 +16,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import RepertoireTrainer from "./RepertoireTrainer";
-import type { RepNode } from "../lib/repertoire";
+import type { DueItem, RepNode } from "../lib/repertoire";
 
-const repDue = vi.hoisted(() => vi.fn(() => Promise.resolve([])));
+const repDue = vi.hoisted(() => vi.fn<() => Promise<DueItem[]>>(() => Promise.resolve([])));
 const repReview = vi.hoisted(() =>
   vi.fn(() => Promise.resolve({ due_ts: 0, interval_days: 1 }))
 );
+const repMarkKnown = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock("../lib/repertoire", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/repertoire")>();
-  return { ...actual, repDue, repReview };
+  return { ...actual, repDue, repReview, repMarkKnown };
 });
 
 vi.mock("../lib/backend", () => ({
@@ -76,14 +77,41 @@ const BOOK: RepNode[] = [
 ];
 
 beforeEach(() => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
   repDue.mockClear();
   repReview.mockClear();
+  repMarkKnown.mockClear();
+  repDue.mockImplementation(() => Promise.resolve([]));
   modus.diagramm = false;
 });
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("RepertoireTrainer · free practice", () => {
+  it("waits for Next or Knowledge after a complete variant", async () => {
+    repDue.mockResolvedValueOnce([{ node_id: 3, side: "white", prompt_sans: ["e4", "e5"], expected_san: "Nf3", line: "Open games", is_new: false }]);
+    render(<RepertoireTrainer nodes={BOOK} onExit={() => {}} />);
+    await screen.findByText("2 / 2");
+    fireEvent.click(screen.getByTestId("board"));
+    expect(await screen.findByRole("button", { name: "rep.nextVariant" })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 1150));
+    expect(screen.getByRole("button", { name: "rep.nextVariant" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "rep.addKnowledge" }));
+    expect(repMarkKnown).toHaveBeenCalledWith(3);
+    expect((await screen.findByRole("status")).textContent).toBe("rep.knowledgeAdded");
+  });
+  it("requires the full selected depth instead of falling back to a shorter line", async () => {
+    localStorage.removeItem("kiebitz.rep.depth.2");
+    localStorage.removeItem("kiebitz.rep.depth.4");
+    const shallow = render(<RepertoireTrainer nodes={BOOK} free trainingPlies={2} onExit={() => {}} />);
+    expect(await screen.findByTestId("board")).toBeTruthy();
+    shallow.unmount();
+
+    // BOOK ends at ply 3; a four-ply exercise cannot be built from it.
+    render(<RepertoireTrainer nodes={BOOK} free trainingPlies={4} onExit={() => {}} />);
+    expect(await screen.findByText("rep.freeEmpty")).toBeTruthy();
+  });
+
   it("builds its stack from the book instead of asking the scheduler", async () => {
     render(<RepertoireTrainer nodes={BOOK} free onExit={() => {}} />);
     // Zwei Fragen · die Grundstellung und die Stellung nach 1...e5.

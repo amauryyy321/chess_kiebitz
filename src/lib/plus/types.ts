@@ -1,20 +1,20 @@
 /**
- * Typen der Kiebitz-Plus-Berechtigung.
+ * Funktionskennungen aus der früheren Plus-Version.
  *
  * Die Feature-IDs sind die verbindliche Liste aus `docs/KIEBITZ_PLUS.md` der
  * API. Sie stehen hier einmal und nirgends sonst als Zeichenkette · ein Gate
  * mit Tippfehler soll der Typ-Checker abfangen, nicht der Nutzer.
  *
- * Kiebitz bleibt local-first: Das Konto trägt Anmeldung, Abrechnung und die
- * signierte Freischaltung. Partien, Analysen und Trainingsdaten verlassen das
- * Gerät dafür nicht.
+ * Alle Funktionen sind jetzt lokal und kostenlos verfügbar. Die Kennungen
+ * bleiben vorerst erhalten, damit lokale Einstellungen und ältere Daten
+ * kompatibel bleiben.
  */
 
-/** In jeder Installation freigeschaltet, auch ohne Konto. */
-export const FREE_FEATURES = ["basic_analysis", "manual_training", "basic_statistics"] as const;
-
-/** Nur mit gültigem Plus · Reihenfolge wie in der Featurematrix. */
-export const PLUS_ONLY_FEATURES = [
+/** Jede Funktion ist in jeder Installation kostenlos verfügbar. */
+export const FREE_FEATURES = [
+  "basic_analysis",
+  "manual_training",
+  "basic_statistics",
   "background_analysis",
   "full_insights",
   "personal_puzzles",
@@ -27,6 +27,9 @@ export const PLUS_ONLY_FEATURES = [
   "reference_database",
   "no_ads",
 ] as const;
+
+/** Keine Funktionen erfordern mehr ein Konto oder ein Abonnement. */
+export const PLUS_ONLY_FEATURES = [] as const;
 
 export type FreeFeature = (typeof FREE_FEATURES)[number];
 export type PlusOnlyFeature = (typeof PLUS_ONLY_FEATURES)[number];

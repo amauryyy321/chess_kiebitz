@@ -6,9 +6,12 @@
  * Namen, und eine neue Feature-ID zwingt den Typ-Checker, hier vorbeizukommen.
  */
 import type { Key } from "../i18n";
-import { PLUS_ONLY_FEATURES, type BillingProvider, type PlusOnlyFeature } from "./types";
+import { PLUS_ONLY_FEATURES, type BillingProvider, type PlusFeature, type PlusOnlyFeature } from "./types";
 
-export const FEATURE_NAME_KEY: Record<PlusOnlyFeature, Key> = {
+export const FEATURE_NAME_KEY: Record<PlusFeature, Key> = {
+  basic_analysis: "plus.f.background",
+  manual_training: "plus.f.plan",
+  basic_statistics: "plus.f.insights",
   background_analysis: "plus.f.background",
   full_insights: "plus.f.insights",
   personal_puzzles: "plus.f.puzzles",
@@ -22,7 +25,10 @@ export const FEATURE_NAME_KEY: Record<PlusOnlyFeature, Key> = {
   no_ads: "plus.f.noAds",
 };
 
-export const FEATURE_DESC_KEY: Record<PlusOnlyFeature, Key> = {
+export const FEATURE_DESC_KEY: Record<PlusFeature, Key> = {
+  basic_analysis: "plus.d.background",
+  manual_training: "plus.d.plan",
+  basic_statistics: "plus.d.insights",
   background_analysis: "plus.d.background",
   full_insights: "plus.d.insights",
   personal_puzzles: "plus.d.puzzles",

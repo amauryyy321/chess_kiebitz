@@ -35,6 +35,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { repertoire as demoRepertoire, repertoireStats, type RepNode as DemoNode } from "../data/demo";
 import { useBackendInfo } from "../lib/backend";
 import { useI18n, useT, type TFunc } from "../lib/i18n";
+import { confirmKnowledgeLine, confirmRepertoireLine } from "../lib/repertoireConfirm";
 import {
   repAddLine,
   repDelete,
@@ -43,6 +44,8 @@ import {
   repImportPgn,
   repImportPgnFile,
   repList,
+  repMarkKnown,
+  repUnmarkKnown,
   repLookup,
   repNodeGames,
   repReorder,
@@ -515,7 +518,11 @@ function LiveRepertoire() {
    * getippt wurde, und nicht die, die zufällig gerade aufgeschlagen ist.
    */
   const [editing, setEditing] = useState<VariationLine | null>(null);
+  const [browseTab, setBrowseTab] = useState<"repertoire" | "map">("repertoire");
+  const [mapPreviewSide, setMapPreviewSide] = useState<"white" | "black" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [graphSelection, setGraphSelection] = useState(false);
+  const [includeDescendants, setIncludeDescendants] = useState(false);
   /**
    * Ist der PGN-Abschnitt des Buchsatzes aufgeschlagen?
    *
@@ -616,7 +623,7 @@ function LiveRepertoire() {
           name: endpoint.name.trim() || (ancestorName ? `${ancestorName} · ${moveLabel(endpoint)}` : moveLabel(endpoint)),
           sans: path.map((node) => node.san),
           nodeIds: path.map((node) => node.id),
-          due: path.filter((node) => node.my_move && (node.reps === 0 || node.due_ts <= now)).length,
+          due: path.filter((node) => node.my_move && !node.known && (node.reps === 0 || node.due_ts <= now)).length,
           hasNote: path.some((node) => node.note.trim() !== ""),
           hasTransposition: path.some((node) => twinsOf(node).length > 0),
           sortOrder: endpoint.sort_order,
@@ -628,6 +635,10 @@ function LiveRepertoire() {
       (a, b) => (a.sortOrder || Number.MAX_SAFE_INTEGER) - (b.sortOrder || Number.MAX_SAFE_INTEGER)
     );
   }, [children, nodes, now, pathNodes, twinsOf]);
+  const learningLines = useMemo(
+    () => variationLines.filter((line) => !byId.get(Number(line.targetId))?.known),
+    [variationLines, byId]
+  );
 
   /**
    * Neue Reihenfolge einer Seite speichern. Das Backend bekommt die Endpunkte
@@ -669,6 +680,8 @@ function LiveRepertoire() {
   useEffect(() => setIdeeOffen(false), [idee?.schluessel]);
 
   const selectVariation = useCallback((line: VariationLine, ply: number) => {
+    setGraphSelection(false);
+    setIncludeDescendants(false);
     setSelectedLineKey(line.key);
     setSelectedId(ply >= 0 ? (line.nodeIds?.[ply] ?? null) : null);
   }, []);
@@ -684,16 +697,40 @@ function LiveRepertoire() {
     () => Object.fromEntries(variationLines.map((line) => [line.key, line.name])),
     [variationLines]
   );
-  /** Ein Ort auf der Karte schlägt seine Variante auf · wie eine Zeile der Liste. */
+  /** Every plotted point selects its exact prefix, even an unnamed fork. */
   const waehleAufDerKarte = useCallback(
     (key: string) => {
-      const line = variationLines.find((value) => value.key === key);
-      if (line) selectVariation(line, (line.nodeIds?.length ?? 0) - 1);
+      const id = Number(key.split(":")[1]);
+      const line = variationLines.find((value) => value.nodeIds?.includes(id));
+      if (!line) return;
+      selectVariation(line, line.nodeIds?.indexOf(id) ?? 0);
+      setMapPreviewSide(line.side);
+      setGraphSelection(false);
     },
     [selectVariation, variationLines]
   );
+  const addGraphKnowledge = async () => {
+    if (selectedId == null) return;
+    if (!confirmKnowledgeLine(t, baseSans)) return;
+    try {
+      await repMarkKnown(selectedId, includeDescendants);
+      reload();
+      setNotice(t("rep.knowledgeAdded"));
+      setGraphSelection(false);
+      setIncludeDescendants(false);
+    } catch (error) { setNotice(errorMessage(error)); }
+  };
+  const removeGraphKnowledge = async () => {
+    if (!selected?.known) return;
+    try {
+      await repUnmarkKnown(selected.id, true);
+      reload();
+      setGraphSelection(false);
+    } catch (error) { setNotice(errorMessage(error)); }
+  };
 
   const selected = selectedId != null ? (byId.get(selectedId) ?? null) : null;
+  const graphActiveKey = selected ? `${selected.side}:${selected.id}` : selectedLineKey;
   const [sharing, setSharing] = useState<ShareSubject | null>(null);
   const baseSans = useMemo(() => pathSans(selectedId), [pathSans, selectedId]);
   const position = useMemo(() => replaySans(baseSans), [baseSans]);
@@ -716,11 +753,13 @@ function LiveRepertoire() {
       }
     };
     for (const grp of demoRepertoire) collect(grp.side === "Weiß" ? "white" : "black", grp.nodes);
+    if (!window.confirm(t("rep.confirmSeed", { n: flat.length }))) return;
     try {
       await batchDataChanges(async () => {
         for (const line of flat) await repAddLine(line.side, line.name, line.sans);
       });
       reload();
+      setNotice(t("rep.starterAdded", { n: flat.length }));
     } catch (e) {
       setNotice(errorMessage(e));
     }
@@ -847,6 +886,7 @@ function LiveRepertoire() {
 
   /** Einen Zug aus einer Lücke ins Buch übernehmen. */
   const adoptGap = async (gap: RepGap) => {
+    if (!confirmRepertoireLine(t, [...gap.path_sans, gap.san])) return;
     try {
       await repAddLine(gap.side, "", [...gap.path_sans, gap.san]);
       reload();
@@ -865,35 +905,17 @@ function LiveRepertoire() {
   const freeTotal = useMemo(() => {
     const asked = new Set<string>();
     for (const node of nodes) {
-      if (node.my_move) asked.add(`${node.side}:${node.parent_id}`);
+      if (node.my_move && !node.known) asked.add(`${node.side}:${node.parent_id}`);
     }
     return asked.size;
   }, [nodes]);
 
-  const treePanel = (
-    <Panel compact={compact} icon={<ListTree size={14} />} title={t("rep.variants")} pad={false}>
-      <VariationList
-        lines={variationLines}
-        selectedLineKey={selectedLineKey}
-        selectedPly={selectedPly}
-        onSelect={selectVariation}
-        onReorder={reorderLines}
-        onDelete={(line) =>
-          typeof line.targetId === "number" &&
-          setPendingDelete({ id: exclusiveRoot(line.targetId), name: line.name })
-        }
-        onEdit={(line) => {
-          setEditing(line);
-          setSeedSans([]);
-          setSeedFocused(false);
-          setMode("add");
-        }}
-      />
-      <div className="border-t border-line p-2">
+  const lineActions = (
+      <div className="flex flex-wrap gap-2">
         {nodes.length === 0 && (
           <button
             onClick={seedStarter}
-            className="mb-1 flex w-full items-center gap-2 rounded-lg border border-dashed border-accent-dim px-3 py-2 text-[12.5px] text-accent transition-colors hover:bg-accent-soft"
+            className="flex items-center gap-2 rounded-lg border border-dashed border-accent-dim px-3 py-2 text-[12.5px] text-accent transition-colors hover:bg-accent-soft"
           >
             <Sparkles size={14} /> {t("rep.seedStarter")}
           </button>
@@ -905,7 +927,7 @@ function LiveRepertoire() {
             setSeedFocused(false);
             setMode("add");
           }}
-          className="flex w-full items-center gap-2 rounded-lg border border-dashed border-line2 px-3 py-2 text-left text-[12.5px] text-ink3 transition-colors hover:border-accent-dim hover:text-accent"
+          className="flex items-center gap-2 rounded-lg border border-dashed border-line2 px-3 py-2 text-left text-[12.5px] text-ink3 transition-colors hover:border-accent-dim hover:text-accent"
         >
           <Plus size={14} className="shrink-0" />
           <span className="min-w-0 truncate">
@@ -913,7 +935,6 @@ function LiveRepertoire() {
           </span>
         </button>
       </div>
-    </Panel>
   );
 
   /**
@@ -1144,20 +1165,58 @@ function LiveRepertoire() {
         </div>
       )}
 
-      <CoverageCard stats={stats} plies={plies} onPlies={setPlies} />
-      <GapsCard gaps={gaps} onAdopt={adoptGap} />
+      <CoverageCard stats={stats} plies={plies} onPlies={setPlies} onTrain={() => setMode("free")} />
+      <GapsCard gaps={gaps} onAdopt={adoptGap} onView={(gap) => {
+        const line = variationLines.find((value) => value.nodeIds?.includes(gap.node_id));
+        if (line) selectVariation(line, line.nodeIds?.indexOf(gap.node_id) ?? 0);
+        setBrowseTab("repertoire");
+      }} />
       <BookCard onDone={reload} onNotice={setNotice} />
     </div>
   );
 
   const kartenKarte = (
-    <RepertoireKarteKarte
-      karte={karte}
-      aktiv={selectedLineKey}
-      namen={kartenNamen}
-      compact={compact}
-      onWaehlen={waehleAufDerKarte}
-    />
+    <div>
+      <RepertoireKarteKarte
+        karte={karte}
+        aktiv={graphActiveKey}
+        nachfahren={graphSelection && includeDescendants}
+        namen={kartenNamen}
+        compact={compact}
+        onWaehlen={waehleAufDerKarte}
+        oppositeBoard={mapPreviewSide && selected ? {
+          selectedSide: mapPreviewSide,
+          content: <div className="rounded-xl border border-line bg-panel2 p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <span className="text-[13px] font-medium text-ink">{t("rep.mapPosition")}</span>
+              <Button onClick={() => setMapPreviewSide(null)} compact>{t("common.close")}</Button>
+            </div>
+            <div className="mx-auto w-fit max-w-full"><Board boardId="repertoire-map-preview"
+              fen={fen} width={compact ? 300 : 380} orientation={selected.side} lastMove={lastMove} /></div>
+          </div>,
+        } : undefined}
+      />
+      {selectedId != null && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {!graphSelection ? <Button primary onClick={() => setGraphSelection(true)}>{t("rep.selectMove")}</Button> : <>
+          <Button onClick={() => setIncludeDescendants((value) => !value)}>
+            {includeDescendants ? "✓ " : ""}{t("rep.selectAllAfter")}
+          </Button>
+          {!selected?.known && <Button onClick={() => void addGraphKnowledge()}>{t("rep.addKnowledge")}</Button>}
+          {selected?.known && <Button onClick={() => void removeGraphKnowledge()}>{t("rep.removeKnowledgeBranch")}</Button>}
+          {selectedLine && <Button onClick={() => { setEditing(selectedLine); setMode("add"); }}>
+            <Pencil size={14} /> {t("rep.editVariant")}
+          </Button>}
+          <Button onClick={() => { setEditing(null); setSeedSans([]); setMode("add"); }}>
+            <Plus size={14} /> {t("rep.addLine")}
+          </Button>
+          {selected && <Button onClick={() => setPendingDelete({ id: selected.id, name: moveLabel(selected) })}>
+            <Trash2 size={14} /> {t("rep.deleteVariant")}
+          </Button>}
+          </>}
+        </div>
+      )}
+    </div>
   );
 
   return (
@@ -1226,6 +1285,18 @@ function LiveRepertoire() {
         </div>
       )}
 
+      {mode === "browse" && (
+        <nav aria-label={t("rep.title")} className="mb-4 flex gap-1 border-b border-line">
+          {(["repertoire", "map"] as const).map((tab) => (
+            <button key={tab} type="button" onClick={() => setBrowseTab(tab)}
+              aria-current={browseTab === tab ? "page" : undefined}
+              className={`px-4 py-2 text-[13px] ${browseTab === tab ? "border-b-2 border-accent font-semibold text-accent" : "text-ink3 hover:text-ink"}`}>
+              {t(tab === "map" ? "rep.mapTitle" : "rep.title")}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {mode === "train" || mode === "free" ? (
         <RepertoireTrainer
           // Die Kennung wechselt mit der Betriebsart · so zieht der Trainer
@@ -1235,6 +1306,7 @@ function LiveRepertoire() {
           dueLimit={limits.due}
           newLimit={limits.fresh}
           free={mode === "free"}
+          trainingPlies={mode === "free" ? plies : undefined}
           onFreeTraining={freeTotal > 0 ? () => setMode("free") : undefined}
           onExit={() => {
             setMode("browse");
@@ -1256,21 +1328,23 @@ function LiveRepertoire() {
           eigeneIds={editing?.nodeIds}
           startFocused={seedFocused}
           onSave={editing ? (side, name, sans) => writeEdit(editing, side, name, sans) : undefined}
-          onDone={(err) => {
+          onDone={(err, saved) => {
             setMode("browse");
             setEditing(null);
             setSeedSans([]);
             setSeedFocused(false);
             if (err) setNotice(err);
+            else if (saved) setNotice(t(editing ? "rep.lineUpdated" : "rep.lineAdded"));
             reload();
           }}
         />
-      ) : diagramMode ? (
+      ) : browseTab === "map" ? kartenKarte : diagramMode ? (
         // Das Buch · dieselben Varianten, dieselbe Stellung, anders gesetzt.
         // Die Buchstellung ist ein Abdruck: Hier wird gelesen, gezogen wird
         // erst im Training (oben, `mode === "train"`).
-        <Suspense fallback={<LeereSeite />}>
+        <><div className="mb-4">{lineActions}</div><Suspense fallback={<LeereSeite />}>
           <RepertoireBlatt
+            showVariants={false}
             mobile={compact}
             kopfRechts={
               stats
@@ -1315,7 +1389,7 @@ function LiveRepertoire() {
             teile={(["white", "black"] as const).map((side) => ({
               titel: t(side === "white" ? "common.white" : "common.black"),
               seite: side,
-              zeilen: variationLines
+              zeilen: learningLines
                 .filter((line) => line.side === side)
                 .map((line) => ({
                   key: line.key,
@@ -1375,7 +1449,7 @@ function LiveRepertoire() {
                 ? `${t("rep.coverageOf", { g: deInt(stats.games_checked) })} · ${t("rep.coveragePlies", { n: deInt(stats.plies) })}`
                 : ""
             }
-            tiefe={{ werte: COVERAGE_PLIES, aktiv: plies, onWaehlen: setPlies }}
+            tiefe={{ werte: COVERAGE_PLIES, aktiv: plies, onWaehlen: setPlies, onTraining: () => setMode("free") }}
             seiten={stats?.by_side}
             lueckenListe={gaps}
             onUebernehmen={adoptGap}
@@ -1388,10 +1462,7 @@ function LiveRepertoire() {
                   : t("rep.gapsCollapsed", { n: deInt(gaps.length) })
             }
             aktivZug={selectedPly}
-            onWaehlen={(key) => {
-              const line = variationLines.find((value) => value.key === key);
-              if (line) selectVariation(line, (line.nodeIds?.length ?? 0) - 1);
-            }}
+            onWaehlen={waehleAufDerKarte}
             // Blättern ist Auswählen mit einem Halbzug daran · derselbe Weg,
             // den auch die Liste der gewöhnlichen Fassung geht.
             onZug={(key, zug) => {
@@ -1444,9 +1515,9 @@ function LiveRepertoire() {
               inhalt: <BookBody onDone={reload} onNotice={setNotice} />,
             }}
             // Dieselbe Karte wie unter den Spalten drüben · als Tafel gestochen.
-            karte={{ daten: karte, namen: kartenNamen }}
+            karte={undefined}
           />
-        </Suspense>
+        </Suspense></>
       ) : compact ? (
         // Auf dem Handy zuerst das Brett · der Variantenbaum ist eine lange
         // Liste und schöbe sonst alles Wesentliche unter die Falz. Die Karte
@@ -1454,15 +1525,14 @@ function LiveRepertoire() {
         <div className="flex flex-col gap-4">
           {boardPane}
           {detailsPane}
-          {kartenKarte}
-          {treePanel}
+          {lineActions}
         </div>
       ) : (
         <>
-          <RepertoireGrid tree={treePanel} board={boardPane} details={detailsPane} />
+          {lineActions}
+          <RepertoireGrid tree={null} board={boardPane} details={detailsPane} />
           {/* Über die ganze Breite unter den drei Spalten · eine Karte will
               man im Ganzen sehen, nicht in einer Spalte gestaucht. */}
-          <div className="mt-4">{kartenKarte}</div>
         </>
       )}
 
@@ -1550,16 +1620,14 @@ function RepertoireGrid({
   details: ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-1 items-start gap-4 min-[1180px]:grid-cols-[minmax(0,var(--board-edge))_minmax(0,1fr)] min-[1480px]:grid-cols-[280px_minmax(0,var(--board-edge))_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 items-start gap-4 min-[1180px]:grid-cols-[minmax(0,var(--board-edge))_minmax(0,1fr)]">
       <div className="order-1 min-[1180px]:col-start-1 min-[1180px]:row-start-1 min-[1480px]:col-start-2">
         {board}
       </div>
       <div className="order-2 min-[1180px]:col-start-2 min-[1180px]:row-start-1 min-[1180px]:row-span-2 min-[1480px]:col-start-3">
         {details}
       </div>
-      <div className="order-3 min-[1180px]:col-start-1 min-[1180px]:row-start-2 min-[1480px]:col-start-1 min-[1480px]:row-start-1 min-[1480px]:row-span-2">
-        {tree}
-      </div>
+      {tree && <div className="order-3">{tree}</div>}
     </div>
   );
 }
@@ -1742,7 +1810,7 @@ function AddLine({
    * von der alten übrig bleibt.
    */
   onSave?: (side: "white" | "black", name: string, sans: string[]) => Promise<void>;
-  onDone: (err?: string) => void;
+  onDone: (err?: string, saved?: boolean) => void;
 }) {
   const t = useT();
   const bearbeiten = onSave != null;
@@ -1909,9 +1977,10 @@ function AddLine({
 
   const save = async () => {
     if (draft.length === 0) return;
+    if (!confirmRepertoireLine(t, sans, onSave != null)) return;
     try {
       await (onSave ? onSave(side, name, sans) : repAddLine(side, name, sans));
-      onDone();
+      onDone(undefined, true);
     } catch (e) {
       onDone(errorMessage(e));
     }

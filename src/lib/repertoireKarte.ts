@@ -65,6 +65,7 @@ export function abruf(tage: number, s: number): number {
  * eine Stabilität (gerundet, 1 bis 365 Tage) hinter die letzte Antwort.
  */
 export function zugSitzt(node: RepNode, now: number): boolean {
+  if (node.known) return true;
   if (!node.my_move || node.reps === 0) return false;
   if (node.stability < SITZT_STABILITAET) return false;
   const intervall = Math.min(365, Math.max(1, Math.round(node.stability)));
@@ -97,6 +98,7 @@ export interface KartenOrt {
   zeile: number;
   name: string;
   eigener: boolean;
+  known: boolean;
   /** Endpunkt einer Variante · dort steht ein Ort mit Namen. */
   endpunkt: boolean;
   /** Ein benannter Zwischenknoten · dort steht ein Landschaftsname. */
@@ -193,9 +195,10 @@ function teilFuer(seite: "white" | "black", nodes: RepNode[], now: number): Kart
       zeile: 0,
       name: node.name.trim(),
       eigener: node.my_move,
+      known: !!node.known,
       endpunkt: unten.length === 0,
       gegend: unten.length > 0 && node.name.trim() !== "",
-      key: unten.length === 0 || node.name.trim() !== "" ? `${seite}:${node.id}` : null,
+      key: `${seite}:${node.id}`,
       lage: "nebel",
       sicht: 0,
     };
@@ -207,7 +210,7 @@ function teilFuer(seite: "white" | "black", nodes: RepNode[], now: number): Kart
       const pfadKnoten = weg.map((id) => byId.get(id)!);
       const zuege = pfadKnoten.filter((zug) => zug.my_move);
       const sitzend = zuege.filter((zug) => zugSitzt(zug, now)).length;
-      const trainiert = zuege.filter((zug) => zug.reps > 0).length;
+      const trainiert = zuege.filter((zug) => zug.reps > 0 || zug.known).length;
       // Der eigene Zweig beginnt hinter der letzten Gabelung · siehe Kopf.
       let gabel = 0;
       pfadKnoten.forEach((zug, index) => {
@@ -215,7 +218,7 @@ function teilFuer(seite: "white" | "black", nodes: RepNode[], now: number): Kart
         if ((kinder.get(parent)?.length ?? 0) > 1) gabel = index;
       });
       const zweig = pfadKnoten.slice(gabel).filter((zug) => zug.my_move);
-      const begonnen = zweig.length > 0 ? zweig.some((zug) => zug.reps > 0) : trainiert > 0;
+      const begonnen = zweig.length > 0 ? zweig.some((zug) => zug.reps > 0 || zug.known) : trainiert > 0;
       const lage: Lage =
         zuege.length > 0 && sitzend === zuege.length ? "klar" : begonnen ? "dunst" : "nebel";
       linien.push({

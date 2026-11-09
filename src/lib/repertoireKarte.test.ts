@@ -98,7 +98,7 @@ describe("repertoireKarte", () => {
     expect(weiss.zeilen).toBe(3);
     // Der Schlüssel ist derselbe wie in der Variantenliste.
     expect(ort.get(c3.id)?.key).toBe(`white:${c3.id}`);
-    expect(ort.get(e5.id)?.key).toBeNull();
+    expect(ort.get(e5.id)?.key).toBe(`white:${e5.id}`);
   });
 
   it("hebt den Nebel über einem Zweig nicht schon wegen des Stamms", () => {

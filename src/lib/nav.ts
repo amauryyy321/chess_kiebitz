@@ -21,7 +21,9 @@ export type PageId =
   | "games"
   | "analysis"
   | "play"
+  | "online"
   | "repertoire"
+  | "knowledge"
   | "endgame"
   | "puzzles"
   | "study"
@@ -49,6 +51,10 @@ export interface Route {
   shared?: SharePayload | null;
   /** Analyse: eine Zugfolge ab einer Stellung · etwa eine Partie gegen die Engine. */
   line?: { fen: string; sans: string[]; chess960: boolean } | null;
+  autoAnalyze?: boolean;
+  analysisNotice?: string;
+  puzzleReview?: boolean;
+  reviewSeconds?: number;
   /**
    * Spielen: Stellung, aus der gegen die Engine gespielt wird · samt der Züge,
    * die von dort schon auf dem Brett standen.
@@ -66,7 +72,9 @@ const PAGES: readonly PageId[] = [
   "games",
   "analysis",
   "play",
+  "online",
   "repertoire",
+  "knowledge",
   "endgame",
   "puzzles",
   "study",
@@ -95,6 +103,7 @@ export interface NavStack {
   push: (page: PageId, params?: RouteParams) => void;
   /** Eine Ebene zurück; false, wenn schon die Wurzel erreicht ist. */
   back: () => boolean;
+  setNavigationLocked: (locked: boolean) => void;
 }
 
 function depthOf(state: unknown): number {
@@ -104,6 +113,8 @@ function depthOf(state: unknown): number {
 
 export function useNavStack(): NavStack {
   const [stack, setStack] = useState<Route[]>(initialStack);
+  const lockedRef = useRef(false);
+  const setNavigationLocked = useCallback((locked: boolean) => { lockedRef.current = locked; }, []);
   // Der Ref führt den Stapel synchron mit; History-Aufrufe dürfen nicht auf
   // den nächsten Render warten.
   const stackRef = useRef<Route[]>(stack);
@@ -121,6 +132,10 @@ export function useNavStack(): NavStack {
     }
     const onPop = (e: PopStateEvent) => {
       const kd = depthOf(e.state);
+      if (lockedRef.current && stackRef.current.length > kd) {
+        window.history.pushState({ kd: stackRef.current.length }, "");
+        return;
+      }
       if (stackRef.current.length > kd) set(stackRef.current.slice(0, kd));
     };
     window.addEventListener("popstate", onPop);
@@ -145,20 +160,21 @@ export function useNavStack(): NavStack {
 
   const navigate = useCallback(
     (page: PageId, params?: RouteParams) =>
-      goTo(page === ROOT.page ? [{ ...ROOT, ...params }] : [ROOT, { page, ...params }]),
+      !lockedRef.current && goTo(page === ROOT.page ? [{ ...ROOT, ...params }] : [ROOT, { page, ...params }]),
     [goTo]
   );
 
   const push = useCallback(
-    (page: PageId, params?: RouteParams) => goTo([...stackRef.current, { page, ...params }]),
+    (page: PageId, params?: RouteParams) => { if (!lockedRef.current) goTo([...stackRef.current, { page, ...params }]); },
     [goTo]
   );
 
   const back = useCallback(() => {
+    if (lockedRef.current) return false;
     if (stackRef.current.length <= 1) return false;
     window.history.back();
     return true;
   }, []);
 
-  return { route: stack[stack.length - 1], depth: stack.length, navigate, push, back };
+  return { route: stack[stack.length - 1], depth: stack.length, navigate, push, back, setNavigationLocked };
 }

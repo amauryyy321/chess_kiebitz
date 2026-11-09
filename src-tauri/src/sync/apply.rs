@@ -255,8 +255,8 @@ fn apply_rep(conn: &mut Connection, nodes: &[SyncRepNode]) -> Result<usize, Stri
         .prepare(
             "INSERT INTO rep_nodes (parent_id, side, san, name, fen_key, depth,
                 stability, difficulty, reps, lapses, due_ts, last_ts, created_ts,
-                sort_order, sort_ts)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                sort_order, sort_ts, known, known_ts)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         )
         .map_err(|e| e.to_string())?;
     let mut update_node = tx
@@ -272,6 +272,9 @@ fn apply_rep(conn: &mut Connection, nodes: &[SyncRepNode]) -> Result<usize, Stri
             "UPDATE rep_nodes SET sort_order = ?2, sort_ts = ?3
              WHERE id = ?1 AND sort_ts < ?3",
         )
+        .map_err(|e| e.to_string())?;
+    let mut update_known = tx
+        .prepare("UPDATE rep_nodes SET known = ?2, known_ts = ?3 WHERE id = ?1 AND known_ts < ?3")
         .map_err(|e| e.to_string())?;
     for n in sorted {
         let alive = n.last_ts.max(n.created_ts);
@@ -314,7 +317,9 @@ fn apply_rep(conn: &mut Connection, nodes: &[SyncRepNode]) -> Result<usize, Stri
                         n.last_ts,
                         n.created_ts,
                         n.sort_order,
-                        n.sort_ts
+                        n.sort_ts,
+                        n.known as i64,
+                        n.known_ts
                     ]
                 )
                 .map_err(|e| e.to_string())?;
@@ -342,10 +347,13 @@ fn apply_rep(conn: &mut Connection, nodes: &[SyncRepNode]) -> Result<usize, Stri
                         .execute(params![id, n.sort_order, n.sort_ts])
                         .map_err(|e| e.to_string())?;
                 }
+                if n.known_ts > 0 {
+                    update_known.execute(params![id, n.known as i64, n.known_ts]).map_err(|e| e.to_string())?;
+                }
             }
         }
     }
-    drop((insert_node, update_node, update_sort));
+    drop((insert_node, update_node, update_sort, update_known));
     tx.commit().map_err(|e| e.to_string())?;
     Ok(merged)
 }

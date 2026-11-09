@@ -202,6 +202,22 @@ export async function importLichess(
   if (!res.ok) throw new Error(`lichess: ${res.status}`);
   const text = await res.text();
 
+  return parseLichessRecords(user, text);
+}
+
+/** One completed Board API game, without waiting for the next bulk import. */
+export async function importLichessGame(user: string, gameId: string): Promise<GameRecord> {
+  const res = await fetch(`https://lichess.org/api/game/export/${encodeURIComponent(gameId)}?opening=true&clocks=true`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`lichess: ${res.status}`);
+  const records = parseLichessRecords(user, JSON.stringify(await res.json()));
+  const found = records.find((game) => game.source_id === gameId);
+  if (!found) throw new Error("Partie terminée introuvable dans l'export Lichess.");
+  return found;
+}
+
+function parseLichessRecords(user: string, text: string): GameRecord[] {
   const games: GameRecord[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;

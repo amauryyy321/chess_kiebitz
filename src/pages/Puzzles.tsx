@@ -18,9 +18,7 @@ import {
   ChevronLast,
   ChevronLeft,
   ChevronRight,
-  Eye,
   Flame,
-  Lightbulb,
   Share2,
   SkipForward,
   Sparkles,
@@ -32,6 +30,7 @@ import { useBackendInfo } from "../lib/backend";
 import { useI18n } from "../lib/i18n";
 import {
   nextPuzzle,
+  puzzleById,
   puzzleHistory,
   puzzleStats,
   recordAttempt,
@@ -72,12 +71,15 @@ export interface PuzzleEntry {
   /** Schwierigkeitsband aus dem Trainingsplan; 0 = keine Vorgabe. */
   initialMinRating?: number;
   initialMaxRating?: number;
+  /** Ouvre la position de l'exercice dans l'analyse. */
+  openAnalysis?: (line: { fen: string; sans: string[]; chess960: boolean }, failed?: boolean, seconds?: number) => void;
 }
 
 export default function Puzzles({
   initialTheme = "",
   initialMinRating = 0,
   initialMaxRating = 0,
+  openAnalysis,
 }: PuzzleEntry) {
   const backend = useBackendInfo();
   if (backend.mode === "pending") return <PuzzleLoading />;
@@ -86,6 +88,7 @@ export default function Puzzles({
       initialTheme={initialTheme}
       initialMinRating={initialMinRating}
       initialMaxRating={initialMaxRating}
+      openAnalysis={openAnalysis}
     />
   ) : (
     <DemoPuzzles />
@@ -100,12 +103,14 @@ function LivePuzzles({
   initialTheme = "",
   initialMinRating = 0,
   initialMaxRating = 0,
+  openAnalysis,
 }: PuzzleEntry) {
   const [stats, setStats] = useState<PuzzleStats | null>(null);
   // Das Tagesziel steht in den Einstellungen, nicht in den Puzzle-Statistiken ·
   // dasselbe Ziel, das Dashboard und Lernplan anzeigen.
   const [goal, setGoal] = useState(0);
   const [hideTheme, setHideTheme] = useState(false);
+  const [reviewSeconds, setReviewSeconds] = useState(120);
   // "Trotzdem weiter": nur für diese Sitzung, damit eigene Aufgaben auch ohne
   // Lichess-Dump erreichbar bleiben.
   const [skipImport, setSkipImport] = useState(false);
@@ -131,6 +136,7 @@ function LivePuzzles({
       .then((s) => {
         setGoal(s.puzzle_goal);
         setHideTheme(s.puzzle_hide_theme);
+        setReviewSeconds(s.puzzle_review_seconds);
       })
       .catch(() => {});
     return onDataChange(reloadStats, ["puzzles", "database"]);
@@ -153,10 +159,12 @@ function LivePuzzles({
       stats={stats}
       goal={goal}
       hideTheme={hideTheme}
+      reviewSeconds={reviewSeconds}
       reloadStats={reloadStats}
       initialTheme={initialTheme}
       initialMinRating={initialMinRating}
       initialMaxRating={initialMaxRating}
+      openAnalysis={openAnalysis}
     />
   );
 }
@@ -174,16 +182,19 @@ function TrainerView({
   stats,
   goal,
   hideTheme,
+  reviewSeconds,
   reloadStats,
   initialTheme = "",
   initialMinRating = 0,
   initialMaxRating = 0,
+  openAnalysis,
 }: PuzzleEntry & {
   stats: PuzzleStats;
   /** Tagesziel aus den Einstellungen; 0 = noch nicht geladen. */
   goal: number;
   /** Motiv der laufenden Aufgabe verdecken · verrät sonst das Ziel. */
   hideTheme: boolean;
+  reviewSeconds: number;
   reloadStats: () => Promise<PuzzleStats | undefined>;
 }) {
   const backend = useBackendInfo();
@@ -200,7 +211,6 @@ function TrainerView({
   const [viewPly, setViewPly] = useState(0);
   const [wrong, setWrong] = useState(false);
   const [shake, setShake] = useState(false);
-  const [showHint, setShowHint] = useState(false);
   /** Verdecktes Motiv für genau diese Aufgabe aufgedeckt. */
   const [themeRevealed, setThemeRevealed] = useState(false);
   /**
@@ -214,6 +224,7 @@ function TrainerView({
   const [theoryOpen, setTheoryOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [ratingDelta, setRatingDelta] = useState<number | null>(null);
+  const [replaying, setReplaying] = useState(false);
   const [sharing, setSharing] = useState<ShareSubject | null>(null);
   /** Brett allein · siehe components/FocusBoard.tsx. */
   const [focused, setFocused] = useState(false);
@@ -268,11 +279,12 @@ function TrainerView({
   const load = (
     t: string = theme,
     s: "all" | "lichess" | "own" = source,
-    b: { min: number; max: number } | null = band
+    b: { min: number; max: number } | null = band,
+    replayId?: string
   ) => {
+    setReplaying(!!replayId);
     setStatus("loading");
     setWrong(false);
-    setShowHint(false);
     setThemeRevealed(false);
     setTheoryOpen(false);
     setSelected(null);
@@ -281,12 +293,12 @@ function TrainerView({
     setPositionHistory([]);
     goToPly(0);
     failedRef.current = false;
-    nextPuzzle({
+    (replayId ? puzzleById(replayId) : nextPuzzle({
       theme: t || undefined,
       source: s === "all" ? undefined : s,
       minRating: b?.min,
       maxRating: b?.max,
-    })
+    }))
       .then((p) => {
         if (!p) {
           setStatus("empty");
@@ -354,7 +366,7 @@ function TrainerView({
   }, [lastPly]);
 
   const finish = (solvedFirstTry: boolean) => {
-    if (!puzzle) return;
+    if (!puzzle || replaying) return;
     recordAttempt(puzzle.id, solvedFirstTry)
       .then((r) => {
         setRatingDelta(r.delta);
@@ -391,6 +403,16 @@ function TrainerView({
       if (!failedRef.current) {
         failedRef.current = true;
         finish(false);
+        if (reviewSeconds > 0 && openAnalysis) {
+          const problemFen = historyRef.current[puzzle.setup_plies] ?? puzzle.fen;
+          const solution = new Chess(problemFen);
+          const sans: string[] = [];
+          for (const uci of puzzle.moves.slice(puzzle.setup_plies)) {
+            try { sans.push(solution.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san); }
+            catch { break; }
+          }
+          openAnalysis({ fen: problemFen, sans, chess960: false }, true, reviewSeconds);
+        }
       }
       return false;
     }
@@ -422,60 +444,10 @@ function TrainerView({
     }
   };
 
-  /**
-   * Den Tipp holen · das zählt wie ein Fehlversuch.
-   *
-   * Vorher war der Tipp folgenlos: Er markierte das Ausgangsfeld des richtigen
-   * Zuges, und wer ihn nahm und dann zog, bekam denselben Ratinggewinn wie
-   * jemand, der die Aufgabe selbst gesehen hat. Damit maß das Puzzle-Rating
-   * nicht mehr die Fähigkeit, sondern die Bereitschaft, den Knopf zu drücken.
-   *
-   * Gebucht wird deshalb sofort und nicht erst beim Zug danach: Der Versuch
-   * ist in dem Augenblick entschieden, in dem die Hilfe angenommen wird — was
-   * danach noch auf dem Brett passiert, ändert daran nichts. `failedRef` sorgt
-   * wie beim falschen Zug dafür, dass genau ein Versuch je Aufgabe in die
-   * Datenbank geht, und dass am Ende „mit Hilfe gelöst" dasteht und nicht
-   * „Richtig".
-   */
-  const takeHint = () => {
-    setShowHint(true);
-    if (!puzzle || failedRef.current) return;
-    failedRef.current = true;
-    finish(false);
-  };
-
-  /**
-   * Die Lösung zeigen · ebenfalls ein Fehlversuch.
-   *
-   * Sie buchte bisher gar nichts, solange vorher kein falscher Zug kam: Eine
-   * so abgeschlossene Aufgabe tauchte in keiner Statistik auf, weder als
-   * gelöst noch als gescheitert. Das war das größere der beiden Löcher — der
-   * bequemste Weg war zugleich der folgenlose.
-   */
-  const revealSolution = () => {
-    if (!puzzle) return;
-    if (!failedRef.current) {
-      failedRef.current = true;
-      finish(false);
-    }
-    const step = () => {
-      if (idxRef.current >= puzzle.moves.length) {
-        setStatus("solved");
-        return;
-      }
-      playUci(puzzle.moves[idxRef.current]);
-      idxRef.current += 1;
-      timerRef.current = setTimeout(step, 450);
-    };
-    step();
-  };
-
-  const hintSquare = puzzle && status === "playing" && atLive ? puzzle.moves[idxRef.current]?.slice(0, 2) : null;
   const squareStyles: Record<string, React.CSSProperties> = {
     ...(status === "playing" && atLive ? moveTargetStyles(fen, selected) : {}),
   };
   if (selected) squareStyles[selected] = { boxShadow: "inset 0 0 0 3px var(--color-accent)" };
-  if (showHint && hintSquare) squareStyles[hintSquare] = { boxShadow: "inset 0 0 0 3px var(--color-gold)" };
 
   // Endet die Kombination mit Matt, bekommt der König sein Zeichen. Mehr
   // nicht: eine gelöste Aufgabe ist keine gewonnene Partie, ein
@@ -832,16 +804,24 @@ function TrainerView({
       {actionShell(
         <span className="text-[13.5px] text-loss">{t("pz.wrong", { d: delta })}</span>,
         <>
-          <Button onClick={takeHint}>
-            <Lightbulb size={15} /> {t("pz.hint")}
-          </Button>
-          <Button onClick={revealSolution}>
-            <Eye size={15} /> {t("pz.solution")}
-          </Button>
+          {openAnalysis && (
+            <Button onClick={analyzePuzzle}>
+              {t("nav.analysis")}
+            </Button>
+          )}
         </>
       )}
     </div>
   );
+
+  const analyzePuzzle = () => {
+    if (!puzzle || !openAnalysis) return;
+    // Pour un exercice Lichess, le premier coup est la mise en place jouée par
+    // l'adversaire. L'analyse doit s'ouvrir sur la position à résoudre, après
+    // ce coup, et non sur la position antérieure.
+    const problemFen = positionHistory[puzzle.setup_plies] ?? puzzle.fen;
+    openAnalysis({ fen: problemFen, sans: [], chess960: false });
+  };
 
   /**
    * Die Zeile unter dem Brett · Meldung, Knöpfe und der Tipp darunter.
@@ -859,7 +839,7 @@ function TrainerView({
    * werden, das Brett hängt nicht an der Zeile, und ein dauerhaft leerer
    * Kasten unter dem Brett wäre nur ein Loch.
    */
-  const puzzleActions = (inFocus: boolean) => (
+  const puzzleActions = (_inFocus: boolean) => (
     <>
       {/* Ein Rasterfeld statt einer Reihe · siehe `actionRow`. Die Meldung
           unter dem Brett war das Letzte, was das Fokus-Brett noch springen
@@ -879,9 +859,12 @@ function TrainerView({
                     t("pz.ratingDelta", { d: `${ratingDelta >= 0 ? "+" : ""}${ratingDelta}` })}
                 </span>
               </div>,
-              <Button primary onClick={() => load()}>
-                <SkipForward size={15} /> {t("common.next")}
-              </Button>
+              <>
+                <Button primary onClick={() => load()}>
+                  <SkipForward size={15} /> {t("common.next")}
+                </Button>
+                {openAnalysis && <Button onClick={analyzePuzzle}>{t("nav.analysis")}</Button>}
+              </>
             )}
           </div>
         )}
@@ -900,38 +883,11 @@ function TrainerView({
                     ? t("pz.noneFound")
                     : t("pz.findBest")}
               </span>,
-              // Tipp und Lösung auch vor dem ersten Fehlversuch · die Lösung
-              // stand bisher erst nach einem falschen Zug zur Wahl. Beides
-              // bucht einen Fehlversuch (siehe `takeHint`, `revealSolution`).
-              status === "playing" && (
-                <>
-                  <Button onClick={takeHint}>
-                    <Lightbulb size={15} /> {t("pz.hint")}
-                  </Button>
-                  <Button onClick={revealSolution}>
-                    <Eye size={15} /> {t("pz.solution")}
-                  </Button>
-                </>
-              )
+              null
             )}
           </div>
         )}
       </div>
-      {(inFocus || (showHint && status === "playing")) && (
-        <div
-          // Im Fokus steht der Kasten immer da und ist nur unsichtbar, solange
-          // niemand den Tipp geholt hat · `visibility: hidden` hält den Platz
-          // und nimmt den Text zugleich aus dem Vorlesen heraus.
-          aria-hidden={showHint && status === "playing" ? undefined : true}
-          className={`rounded-lg border border-line bg-panel px-4 py-2.5 text-[12.5px] text-ink2 ${
-            showHint && status === "playing" ? "" : "invisible"
-          }`}
-        >
-          {t("pz.hintText", {
-            theme: mainTheme ? t("pz.hintTheme", { m: themeLabel(mainTheme, locale) }) : "",
-          })}
-        </div>
-      )}
     </>
   );
 
@@ -1020,11 +976,7 @@ function TrainerView({
                     }`
                   : wrong
                     ? t("pz.wrong", { d: ratingDelta != null ? ` (Rating ${ratingDelta})` : "" })
-                    : showHint
-                      ? t("pz.hintText", {
-                          theme: mainTheme ? t("pz.hintTheme", { m: themeLabel(mainTheme, locale) }) : "",
-                        })
-                      : t("pz.findBest")
+                    : t("pz.findBest")
           }
           ton={status === "solved" ? "richtig" : wrong && status === "playing" ? "falsch" : "offen"}
           brett={puzzleBoard("puzzle")}
@@ -1034,10 +986,12 @@ function TrainerView({
           // die gelöste (oder aufgedeckte) Aufgabe bekommt den Weg nach vorn.
           schalter={
             status === "solved"
-              ? [{ label: t("common.next"), betont: true, onClick: () => load() }]
+              ? [
+                  { label: t("common.next"), betont: true, onClick: () => load() },
+                  ...(openAnalysis ? [{ label: t("nav.analysis"), onClick: analyzePuzzle }] : []),
+                ]
               : [
-                  { label: t("pz.hint"), onClick: status === "playing" ? takeHint : undefined },
-                  { label: t("pz.solution"), onClick: status === "playing" ? revealSolution : undefined },
+                  ...(wrong && openAnalysis ? [{ label: t("nav.analysis"), onClick: analyzePuzzle }] : []),
                 ]
           }
           verlaufSchalter={[
@@ -1208,7 +1162,9 @@ function TrainerView({
                 {themeStats.map((th) => {
                   const acc = Math.round((th.solved / th.attempts) * 100);
                   return (
-                    <div key={th.theme} className="flex items-center gap-3">
+                    <button key={th.theme} type="button" onClick={() => pickTheme(th.theme)}
+                      className="flex w-full items-center gap-3 rounded text-left hover:bg-panel2"
+                      aria-label={`${themeLabel(th.theme, locale)} · ${t("ins.trainTheme")}`}>
                       <span className="w-28 shrink-0 truncate text-[12.5px] text-ink2">{themeLabel(th.theme, locale)}</span>
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-panel3">
                         <div
@@ -1220,7 +1176,7 @@ function TrainerView({
                         />
                       </div>
                       <span className="w-10 text-right text-[12.5px] tabular-nums text-ink2">{acc} %</span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1274,7 +1230,7 @@ function TrainerView({
             </div>
           </Card>
 
-          <PuzzleHistory {...attempts} />
+          <PuzzleHistory {...attempts} onReplay={(id) => load(theme, source, band, id)} />
         </div>
       </div>
 
@@ -1328,7 +1284,7 @@ function useAttemptHistory(): AttemptHistory {
 }
 
 /** Verlauf der letzten Versuche · standardmäßig zugeklappt. */
-function PuzzleHistory({ open, onToggle, rows }: AttemptHistory) {
+function PuzzleHistory({ open, onToggle, rows, onReplay }: AttemptHistory & { onReplay: (id: string) => void }) {
   const { locale, t } = useI18n();
 
   return (
@@ -1390,6 +1346,7 @@ function PuzzleHistory({ open, onToggle, rows }: AttemptHistory) {
                   {delta >= 0 ? "+" : "−"}
                   {Math.abs(delta)}
                 </span>
+                {!row.solved && <Button onClick={() => onReplay(row.puzzle_id)} compact>{t("pz.replay")}</Button>}
               </li>
             );
           })}

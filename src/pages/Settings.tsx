@@ -36,8 +36,8 @@ import {
   Scale,
   ShieldCheck,
   Smartphone,
-  Square,
   Sparkles,
+  Square,
   Trash2,
   UserRound,
   Volume2,
@@ -115,7 +115,6 @@ import { applyReminderSchedule, sendTestReminder } from "../lib/notify";
 import { indexPositions } from "../lib/analysis";
 import { playBoardSound, setBoardSoundEnabled, setBoardSoundVolume } from "../lib/sound";
 import { setBoardSignsEnabled } from "../lib/boardSigns";
-import PlusSection from "./settings/PlusSection";
 import { PlusBadge, PlusBadgeButton } from "../components/PlusLock";
 import { usePlus, usePlusGate } from "../lib/plus/usePlus";
 import { openPlusDialog } from "../lib/plus/dialog";
@@ -1112,17 +1111,6 @@ export default function SettingsPage({
       ),
     },
     {
-      // Konto und Freischaltung stehen vor den Schachkonten: Wer nach „Plus"
-      // sucht, sucht hier, und der Trial-Einstieg gehört an eine Stelle, die
-      // man ohne Suchen findet.
-      id: "plus",
-      group: "account",
-      icon: Sparkles,
-      title: t("plus.title"),
-      summary: t("plus.summary"),
-      content: <PlusSection />,
-    },
-    {
       id: "accounts",
       group: "account",
       icon: UserRound,
@@ -1166,6 +1154,20 @@ export default function SettingsPage({
               min={1}
               max={200}
               onChange={(v) => patch({ puzzle_goal: v })}
+            />
+            <NumberField
+              label={t("set.puzzleReviewSeconds")}
+              value={draft.puzzle_review_seconds}
+              min={0}
+              max={3600}
+              onChange={(v) => patch({ puzzle_review_seconds: v })}
+            />
+            <NumberField
+              label={t("set.gameReviewSeconds")}
+              value={draft.game_review_seconds}
+              min={0}
+              max={3600}
+              onChange={(v) => patch({ game_review_seconds: v })}
             />
             <NumberField
               label={t("set.repDueLimit")}
@@ -1895,7 +1897,7 @@ export default function SettingsPage({
           >
             {/* Überschrift und Hinweis setzt der Abschnitt · die Werte stehen
                 hinter dem Stift der Engine, die rechnet. */}
-            <div className="grid grid-cols-2 gap-3 min-[640px]:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 min-[640px]:grid-cols-3">
               <NumberField
                 label={t("set.threads")}
                 value={draft.engine_threads}
@@ -1917,20 +1919,6 @@ export default function SettingsPage({
                 max={3}
                 onChange={(v) => patch({ engine_multipv: v })}
               />
-              <NumberField
-                label={t("set.liveDepth")}
-                value={draft.live_depth}
-                min={8}
-                max={40}
-                onChange={(v) => patch({ live_depth: v })}
-              />
-              <NumberField
-                label={t("set.batchDepth")}
-                value={draft.batch_depth}
-                min={6}
-                max={30}
-                onChange={(v) => patch({ batch_depth: v })}
-              />
             </div>
             <div className="mt-4">
               <Field label={t("set.syzygyPath")}>
@@ -1948,6 +1936,24 @@ export default function SettingsPage({
         ) : (
           desktopOnly
         ),
+    },
+    {
+      id: "analysis-depth",
+      group: "advanced",
+      icon: Cpu,
+      title: t("set.depthTitle"),
+      summary: t("set.depthSummary"),
+      content: draft ? (
+        <>
+          <p className="mb-3 text-[12.5px] leading-relaxed text-ink2">{t("set.depthNote")}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <NumberField label={t("set.liveDepth")} value={draft.live_depth} min={8} max={40}
+              onChange={(v) => patch({ live_depth: v })} />
+            <NumberField label={t("set.batchDepth")} value={draft.batch_depth} min={6} max={30}
+              onChange={(v) => patch({ batch_depth: v })} />
+          </div>
+        </>
+      ) : desktopOnly,
     },
     {
       id: "database",

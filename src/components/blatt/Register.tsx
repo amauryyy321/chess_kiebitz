@@ -20,7 +20,6 @@ import type { PageId } from "../../lib/nav";
 import { deInt } from "../../lib/format";
 import { useT, type Key } from "../../lib/i18n";
 import { COMPACT_LIMIT, taglineKey, taglineWidth } from "../../lib/tagline";
-import PlanBadge from "../PlanBadge";
 import BrandMark from "../BrandMark";
 import "./blatt.css";
 
@@ -97,7 +96,6 @@ function Marke() {
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-semibold uppercase tracking-[0.14em]">Kiebitz</span>
-          <PlanBadge />
         </div>
         <div className="mt-0.5 text-[11px] text-ink3">{t(taglineKey())}</div>
       </div>
@@ -111,6 +109,7 @@ export function RegisterSidebar({
   zahlen,
   onSelect,
   foot,
+  disabledIds = [],
 }: {
   items: readonly RegisterItem[];
   page: PageId;
@@ -118,6 +117,7 @@ export function RegisterSidebar({
   onSelect: (id: PageId) => void;
   /** Der Stand der Datenbank · zwei Zeilen Kleinsatz. */
   foot: ReactNode;
+  disabledIds?: PageId[];
 }) {
   const t = useT();
   const settingsActive = page === "settings";
@@ -136,9 +136,10 @@ export function RegisterSidebar({
               key={id}
               type="button"
               onClick={() => onSelect(id)}
+              disabled={disabledIds.includes(id)}
               data-tour={`nav-${id}`}
               aria-current={active ? "page" : undefined}
-              className="relative flex min-h-11 items-baseline gap-2 px-5 text-start"
+              className="relative flex min-h-11 items-baseline gap-2 px-5 text-start disabled:cursor-not-allowed disabled:opacity-50"
             >
               {active && (
                 <span
@@ -257,7 +258,6 @@ export function RegisterAppBar({
       <span className="buch min-w-0 flex-1 truncate px-2 text-[14.5px] text-ink3">
         · {title ?? t(taglineKey((key) => taglineWidth(t(key)) <= COMPACT_LIMIT))}
       </span>
-      <PlanBadge />
       <button
         type="button"
         onClick={onSettings}

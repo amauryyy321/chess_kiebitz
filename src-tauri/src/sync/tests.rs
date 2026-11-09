@@ -450,6 +450,8 @@ mod tests {
             created_ts: 0,
             sort_order: 0,
             sort_ts: 0,
+            known: false,
+            known_ts: 0,
         };
         apply_rep(&mut conn, &[node("e4", 1, 10, 1), node("e4 e5", 2, 10, 1)]).unwrap();
         let count: i64 = conn
@@ -495,6 +497,8 @@ mod tests {
             created_ts: 0,
             sort_order,
             sort_ts,
+            known: false,
+            known_ts: 0,
         };
         let order = |conn: &Connection| -> (i64, i64) {
             conn.query_row(
@@ -790,6 +794,8 @@ mod tests {
             created_ts,
             sort_order: 0,
             sort_ts: 0,
+            known: false,
+            known_ts: 0,
         };
         // Baum: e4 → e5 → Nf3; alles alt (ts 10).
         apply_rep(

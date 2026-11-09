@@ -6,7 +6,7 @@ import { Button, Card, Chip } from "../../components/ui";
 import { useMobileShell } from "../../components/MobileShell";
 import { de } from "../../lib/format";
 
-export const COVERAGE_PLIES = [6, 8, 12, 16];
+export const COVERAGE_PLIES = [2, 4, 6, 8, 12, 16];
 
 function moveText(sans: string[]): string {
   return sans.map((move, index) => (index % 2 === 0 ? `${index / 2 + 1}.${move}` : move)).join(" ");
@@ -17,10 +17,12 @@ export function CoverageCard({
   stats,
   plies,
   onPlies,
+  onTrain,
 }: {
   stats: RepStats | null;
   plies: number;
   onPlies: (value: number) => void;
+  onTrain?: () => void;
 }) {
   const t = useT();
   return (
@@ -32,6 +34,7 @@ export function CoverageCard({
           </Chip>
         ))}
       </div>
+      {onTrain && <Button onClick={onTrain}>{t("rep.freeTraining")} · {t("rep.coveragePlies", { n: plies })}</Button>}
       {stats ? (
         <>
           <div className="mt-3 flex items-baseline gap-2">
@@ -75,7 +78,7 @@ export function CoverageCard({
  * Zugeklappt, weil die Liste lang wird und niemand sie bei jedem Blick aufs
  * Repertoire braucht · die Kopfzeile sagt trotzdem, wie viele es sind.
  */
-export function GapsCard({ gaps, onAdopt }: { gaps: RepGap[] | null; onAdopt: (gap: RepGap) => void }) {
+export function GapsCard({ gaps, onAdopt, onView }: { gaps: RepGap[] | null; onAdopt: (gap: RepGap) => void; onView?: (gap: RepGap) => void }) {
   const t = useT();
   const mobile = useMobileShell();
   const [open, setOpen] = useState(false);
@@ -141,9 +144,10 @@ export function GapsCard({ gaps, onAdopt }: { gaps: RepGap[] | null; onAdopt: (g
                     {t("rep.gapBook", { sans: gap.book_sans.join(" / ") })} · {de(gap.score_pct)} %
                   </div>
                 </div>
-                <Button onClick={() => onAdopt(gap)} title={t("rep.gapAdopt")}>
-                  <Plus size={14} />
-                </Button>
+                <div className="flex shrink-0 gap-1">
+                  {onView && <Button onClick={() => onView(gap)}>{t("rep.viewPosition")}</Button>}
+                  <Button onClick={() => onAdopt(gap)} title={t("rep.gapAdopt")}><Plus size={14} /></Button>
+                </div>
               </div>
             </li>
           ))}

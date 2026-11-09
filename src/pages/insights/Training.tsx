@@ -42,12 +42,14 @@ export default function Training({
   puzzles,
   findings,
   onAction,
+  onOpenPuzzles,
   desktop = true,
 }: {
   deep: DeepInsights;
   puzzles: PuzzleInsights | null;
   findings: Finding[];
   onAction: (finding: Finding) => void;
+  onOpenPuzzles?: (theme: string) => void;
   desktop?: boolean;
 }) {
   const { locale, t } = useI18n();
@@ -471,14 +473,13 @@ export default function Training({
           <div className="space-y-4">
             {weakest.length > 0 ? (
               weakest.map((theme) => (
-                <MetricBar
-                  key={theme.theme}
-                  label={themeLabel(theme.theme, locale)}
-                  note={t("ins.trAttemptsNote", { n: deInt(theme.attempts) })}
-                  value={solveRate(theme)}
-                  good={60}
-                  bad={45}
-                />
+                <button key={theme.theme} type="button" onClick={() => onOpenPuzzles?.(theme.theme)}
+                  className="w-full rounded-lg text-left hover:bg-panel2" disabled={!onOpenPuzzles}
+                  aria-label={`${themeLabel(theme.theme, locale)} · ${t("ins.trainTheme")}`}>
+                  <MetricBar label={themeLabel(theme.theme, locale)}
+                    note={t("ins.trAttemptsNote", { n: deInt(theme.attempts) })}
+                    value={solveRate(theme)} good={60} bad={45} />
+                </button>
               ))
             ) : (
               <Empty text={t("ins.pzThemesTooFew")} />
@@ -535,7 +536,8 @@ export default function Training({
           {mobile ? (
             <div className="-mx-4">
               {data.themes.map((theme) => (
-                <div key={theme.theme} className="border-b border-line/70 px-4 py-2.5 last:border-0">
+                <button key={theme.theme} type="button" onClick={() => onOpenPuzzles?.(theme.theme)}
+                  disabled={!onOpenPuzzles} className="w-full border-b border-line/70 px-4 py-2.5 text-left hover:bg-panel2 last:border-0">
                   <div className="flex items-baseline gap-2">
                     <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
                       {themeLabel(theme.theme, locale)}
@@ -551,7 +553,7 @@ export default function Training({
                   <div className="mt-0.5 text-[11.5px] tabular-nums text-ink3">
                     {t("ins.pzSolvedOfAttempts", { s: deInt(theme.solved), n: deInt(theme.attempts) })}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           ) : (
@@ -569,7 +571,10 @@ export default function Training({
                   {data.themes.map((theme) => (
                     <tr key={theme.theme} className="border-b border-line/70 last:border-0">
                       <td className="max-w-[280px] truncate px-4 py-2.5 text-[12.5px] text-ink">
-                        {themeLabel(theme.theme, locale)}
+                        <button type="button" onClick={() => onOpenPuzzles?.(theme.theme)}
+                          disabled={!onOpenPuzzles} className="text-left hover:text-accent hover:underline">
+                          {themeLabel(theme.theme, locale)}
+                        </button>
                       </td>
                       <td className="px-3 py-2.5 text-right text-[12px] tabular-nums text-ink2">
                         {deInt(theme.attempts)}

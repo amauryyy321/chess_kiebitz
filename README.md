@@ -8,8 +8,6 @@ on your own devices.
 No Kiebitz account and no chess-data cloud. Games, analyses, and settings stay
 on your device. Devices sync directly with each other over the local network.
 
-**Website:** <https://kiebitz.dev/> · **Downloads:**
-[latest release](https://github.com/kiebitz-dev/Kiebitz/releases/latest)
 
 ## Features
 
@@ -73,14 +71,4 @@ The two layout modes and what each one is for: [`docs/design.md`](docs/design.md
 
 Tauri 2 · React + TypeScript · Rust · SQLite · Stockfish
 
-## License
 
-Kiebitz is **source-available, not open source**. You may read the code, build it
-and run it privately; what you may not do is redistribute it or build a product
-on it. Using Kiebitz itself — including while you teach, stream or otherwise earn
-money from your own chess — is not restricted. See [`LICENSE`](LICENSE) for the
-exact terms, and https://kiebitz.dev/terms for the account and Kiebitz Plus.
-
-Bundled third-party software keeps its own license — notably Stockfish under
-GPL-3.0, whose corresponding source is attached to every release. See
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

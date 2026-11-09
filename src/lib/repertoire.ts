@@ -19,6 +19,7 @@ export interface RepNode {
   stability: number;
   /** Selbst gezogene Position in der Variantenliste · 0 = nie sortiert. */
   sort_order: number;
+  known?: boolean;
   my_move: boolean;
 }
 
@@ -88,6 +89,14 @@ export interface NodeGameStats {
 
 export function repList(): Promise<RepNode[]> {
   return invoke<RepNode[]>("rep_list");
+}
+
+export function repMarkKnown(nodeId: number, descendants = false): Promise<void> {
+  return invoke<void>("rep_mark_known", { nodeId, descendants }).then(() => emitDataChange("repertoire"));
+}
+
+export function repUnmarkKnown(nodeId: number, descendants = false): Promise<void> {
+  return invoke<void>("rep_unmark_known", { nodeId, descendants }).then(() => emitDataChange("repertoire"));
 }
 
 export function repAddLine(side: "white" | "black", name: string, sans: string[]): Promise<number> {
@@ -169,7 +178,7 @@ export function repFreeItems(nodes: RepNode[], random: () => number = Math.rando
   const asked = new Set<string>();
   const items: DueItem[] = [];
   for (const node of nodes) {
-    if (!node.my_move) continue;
+    if (!node.my_move || node.known) continue;
     const question = `${node.side}:${node.parent_id}`;
     if (asked.has(question)) continue;
     asked.add(question);

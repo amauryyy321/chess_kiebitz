@@ -23,6 +23,7 @@ import {
   repDue,
   repFreeItems,
   repReview,
+  repMarkKnown,
   repSetNote,
   type DueItem,
   type RepNode,
@@ -37,6 +38,7 @@ import { Button, Card } from "./ui";
 import FocusBoard, { FocusButton } from "./FocusBoard";
 import RepertoireNote from "./RepertoireNote";
 import { useT } from "../lib/i18n";
+import { confirmKnowledgeLine } from "../lib/repertoireConfirm";
 import { fenAfter, replaySans } from "../lib/position";
 import { useBackendInfo } from "../lib/backend";
 import { maybeRequestPlayReview } from "../lib/reviewPrompt";
@@ -49,16 +51,21 @@ import { LeereSeite } from "./blatt/LeereSeite";
 const TrainerBlatt = lazy(() => import("../pages/blatt/TrainerBlatt"));
 
 /** Wie lange die gelöste Stellung stehen bleibt, bevor die nächste Karte kommt. */
-const ADVANCE_MS = 1000;
 /** Pause, bevor der Gegner antwortet · ohne sie wirkt es wie ein Sprung. */
 const REPLY_MS = 550;
 /** Höchstzahl eigener Züge je Karte, damit eine Linie nicht endlos läuft. */
-const MAX_CHAIN = 6;
+const MAX_CHAIN = 20;
 /** Antwortzeiten, aus denen die FSRS-Note abgeleitet wird. */
 const EASY_MS = 3_000;
 const HARD_MS = 10_000;
 
 const EMPTY_SANS: string[] = [];
+
+/** Nur Linien mit allen Zügen bis zur gewählten Tiefe gehören in die Übung. */
+function reachesPly(nodes: RepNode[], nodeId: number, ply: number, target: number): boolean {
+  if (ply >= target) return true;
+  return nodes.some((node) => node.parent_id === nodeId && reachesPly(nodes, node.id, ply + 1, target));
+}
 
 /** Schach- und Mattzeichen zählen für den Vergleich nicht. */
 const bareSan = (san: string) => san.replace(/[+#]/g, "");
@@ -120,6 +127,7 @@ export default function RepertoireTrainer({
   dueLimit,
   newLimit,
   free = false,
+  trainingPlies,
   onExit,
   onFreeTraining,
 }: {
@@ -128,6 +136,8 @@ export default function RepertoireTrainer({
   newLimit?: number;
   /** Freies Üben statt Plan · siehe Kopf dieser Datei. */
   free?: boolean;
+  /** Freies Üben beginnt am Anfang jeder Seite und endet bei dieser Tiefe. */
+  trainingPlies?: number;
   onExit: () => void;
   /** Angeboten, wenn der Plan nichts hergibt · fehlt beim freien Üben selbst. */
   onFreeTraining?: () => void;
@@ -139,6 +149,10 @@ export default function RepertoireTrainer({
   const [items, setItems] = useState<DueItem[] | null>(null);
   const [idx, setIdx] = useState(0);
   const [state, setState] = useState<"ask" | "correct" | "wrong">("ask");
+  const [complete, setComplete] = useState(false);
+  const [replayNonce, setReplayNonce] = useState(0);
+  const [knownError, setKnownError] = useState<string | null>(null);
+  const [knownNotice, setKnownNotice] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
   /** Brett allein · siehe components/FocusBoard.tsx. */
   const [focused, setFocused] = useState(false);
@@ -146,6 +160,7 @@ export default function RepertoireTrainer({
   const [viewPly, setViewPly] = useState(0);
   /** Züge nach der Ausgangsstellung · eigene Antworten und Gegnerzüge. */
   const [played, setPlayed] = useState<string[]>([]);
+  const playedRef = useRef<string[]>([]);
   /** Buchzüge, die an der aktuellen Stelle zählen. */
   const [answers, setAnswers] = useState<Answer[]>([]);
   /**
@@ -171,6 +186,8 @@ export default function RepertoireTrainer({
   const itemsRef = useRef<DueItem[]>([]);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const reviewMomentSentRef = useRef(false);
+  const cardFailedRef = useRef(false);
+  const streaksRef = useRef(new Map<number, number>());
 
   const later = useCallback((fn: () => void, ms: number) => {
     timersRef.current.push(setTimeout(fn, ms));
@@ -183,11 +200,32 @@ export default function RepertoireTrainer({
   // Der Stapel wird genau einmal gezogen · träfen später geladene Grenzen oder
   // ein nachgeladenes Buch ein, würde die laufende Sitzung mitten im Zählen
   // neu beginnen.
-  const startRef = useRef({ dueLimit, newLimit, free, nodes });
+  const startRef = useRef({ dueLimit, newLimit, free, nodes, trainingPlies });
   useEffect(() => {
     const start = startRef.current;
     if (start.free) {
-      setItems(repFreeItems(start.nodes));
+      const all = repFreeItems(start.nodes);
+      if (start.trainingPlies) {
+        try {
+          const saved = JSON.parse(localStorage.getItem(`kiebitz.rep.depth.${start.trainingPlies}`) ?? "{}") as Record<string, number>;
+          streaksRef.current = new Map(Object.entries(saved).map(([id, count]) => [Number(id), count]));
+        } catch { /* Ohne Speicher beginnt die Übung wieder bei null. */ }
+        const first = new Map<string, DueItem>();
+        for (const entry of all) {
+          const key = entry.side;
+          const previous = first.get(key);
+          if (!previous || entry.prompt_sans.length < previous.prompt_sans.length) first.set(key, entry);
+        }
+        const roots = all.filter((entry) => {
+          if (entry.prompt_sans.length !== first.get(entry.side)?.prompt_sans.length) return false;
+          const parent = start.nodes.find((node) => node.id === entry.node_id)?.parent_id;
+          return start.nodes.some((node) => node.parent_id === parent && node.my_move
+            && reachesPly(start.nodes, node.id, entry.prompt_sans.length + 1, start.trainingPlies!));
+        });
+        setItems(Array.from({ length: 5 }, (_, round) => roots.filter(
+          (entry) => (streaksRef.current.get(entry.node_id) ?? 0) + round < 5
+        )).flat());
+      } else setItems(all);
       return;
     }
     repDue(start.dueLimit, start.newLimit)
@@ -251,13 +289,18 @@ export default function RepertoireTrainer({
     if (!item) return;
     clearTimers();
     setPlayed([]);
+    playedRef.current = [];
+    setComplete(false);
+    setKnownError(null);
     setViewPly(item.prompt_sans.length);
     setState("ask");
     failedRef.current = false;
+    cardFailedRef.current = false;
     chainRef.current = 0;
     askedAtRef.current = Date.now();
     const parentId = byId.get(item.node_id)?.parent_id ?? 0;
-    const alternatives = childrenOf(parentId, item.side).filter((n) => n.my_move);
+    const alternatives = childrenOf(parentId, item.side).filter((n) => n.my_move && !n.known
+      && (!trainingPlies || reachesPly(nodes, n.id, item.prompt_sans.length + 1, trainingPlies)));
     setAnswers(
       alternatives.length > 0
         ? alternatives.map((n) => ({ id: n.id, san: n.san }))
@@ -265,7 +308,7 @@ export default function RepertoireTrainer({
     );
     setNoteId(alternatives[0]?.id ?? item.node_id);
     setNoteOpen(false);
-  }, [item, byId, childrenOf, clearTimers]);
+  }, [item, idx, replayNonce, byId, childrenOf, clearTimers, trainingPlies, nodes]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -284,21 +327,56 @@ export default function RepertoireTrainer({
 
   /** Zur nächsten Karte · schon beantwortete Züge werden übersprungen. */
   const advance = useCallback(() => {
+    if (free && trainingPlies && itemsRef.current[idx]) {
+      const currentItem = itemsRef.current[idx];
+      const old = streaksRef.current.get(currentItem.node_id) ?? 0;
+      const nextStreak = cardFailedRef.current ? 0 : old + 1;
+      streaksRef.current.set(currentItem.node_id, nextStreak);
+      try {
+        localStorage.setItem(`kiebitz.rep.depth.${trainingPlies}`, JSON.stringify(Object.fromEntries(streaksRef.current)));
+      } catch { /* Der Lernstand dieser Sitzung bleibt nutzbar. */ }
+      if (nextStreak < 5 && idx + 1 >= itemsRef.current.length) {
+        setItems((current) => current ? [...current, currentItem] : current);
+      }
+    }
     setIdx((current) => {
       let next = current + 1;
       while (
         next < itemsRef.current.length
-        && answeredRef.current.has(itemsRef.current[next].node_id)
+        && (free && trainingPlies
+          ? (streaksRef.current.get(itemsRef.current[next].node_id) ?? 0) >= 5
+          : answeredRef.current.has(itemsRef.current[next].node_id))
       ) {
         next += 1;
       }
       return next;
     });
-  }, []);
+  }, [free, trainingPlies, idx]);
 
-  const finishCard = useCallback(() => later(advance, ADVANCE_MS), [advance, later]);
+  const finishCard = useCallback(() => setComplete(true), []);
+
+  const addKnown = async () => {
+    if (!item || !complete) return;
+    const path = [...item.prompt_sans, ...playedRef.current];
+    let parent = 0;
+    const ids: number[] = [];
+    for (const san of path) {
+      const node = nodes.find((n) => n.side === item.side && n.parent_id === parent && n.san === san);
+      if (!node) { setKnownError("Variante introuvable dans le répertoire."); return; }
+      ids.push(node.id);
+      parent = node.id;
+    }
+    if (!confirmKnowledgeLine(t, path)) return;
+    try {
+      await repMarkKnown(parent);
+      ids.forEach((id) => answeredRef.current.add(id));
+      setKnownNotice(t("rep.knowledgeAdded"));
+      advance();
+    } catch (error) { setKnownError(String(error)); }
+  };
 
   const show = (san: string) => {
+    playedRef.current = [...playedRef.current, san];
     setPlayed((current) => [...current, san]);
     setViewPly((value) => value + 1);
   };
@@ -310,13 +388,20 @@ export default function RepertoireTrainer({
    */
   const continueLine = useCallback(
     (nodeId: number, side: "white" | "black") => {
+      if (trainingPlies && lineSans.length + 1 >= trainingPlies) return finishCard();
       if (chainRef.current >= MAX_CHAIN) return finishCard();
-      const replies = childrenOf(nodeId, side);
+      const replies = childrenOf(nodeId, side).filter((reply) => !trainingPlies
+        || reachesPly(nodes, reply.id, lineSans.length + 2, trainingPlies));
       if (replies.length === 0) return finishCard();
       const reply = replies[Math.floor(Math.random() * replies.length)];
       later(() => {
         show(reply.san);
-        const mine = childrenOf(reply.id, side).filter((n) => n.my_move);
+        if (trainingPlies && lineSans.length + 2 >= trainingPlies) {
+          finishCard();
+          return;
+        }
+        const mine = childrenOf(reply.id, side).filter((n) => n.my_move && !n.known
+          && (!trainingPlies || reachesPly(nodes, n.id, lineSans.length + 3, trainingPlies)));
         if (mine.length === 0) {
           finishCard();
           return;
@@ -330,7 +415,7 @@ export default function RepertoireTrainer({
         askedAtRef.current = Date.now();
       }, REPLY_MS);
     },
-    [childrenOf, finishCard, later]
+    [childrenOf, finishCard, later, trainingPlies, lineSans.length, nodes]
   );
 
   const accept = (answer: Answer, san: string, side: "white" | "black") => {
@@ -348,7 +433,7 @@ export default function RepertoireTrainer({
   };
 
   const tryMove = (from: string, to: string): boolean => {
-    if (!item || state !== "ask" || !atLive) return false;
+    if (!item || complete || state !== "ask" || !atLive) return false;
     let san: string;
     try {
       const chess = new Chess(liveFen);
@@ -363,6 +448,7 @@ export default function RepertoireTrainer({
     }
     if (!failedRef.current) {
       failedRef.current = true;
+      cardFailedRef.current = true;
       const missed = answers[0];
       record(missed.id, 1);
       setDoneCount((c) => ({ ...c, fail: c.fail + 1 }));
@@ -384,6 +470,7 @@ export default function RepertoireTrainer({
     if (!item || state !== "ask") return;
     if (!failedRef.current) {
       failedRef.current = true;
+      cardFailedRef.current = true;
       record(answers[0].id, 1);
       setDoneCount((c) => ({ ...c, fail: c.fail + 1 }));
       if (!requeuedRef.current.has(item.node_id)) {
@@ -442,6 +529,7 @@ export default function RepertoireTrainer({
         : t("rep.allLearned");
     if (diagramMode) {
       return (
+        <>{knownNotice && <p role="status" className="mb-3 text-[13px] text-accent">{knownNotice}</p>}
         <Suspense fallback={<LeereSeite />}>
           <TrainerBlatt
             mobile={mobile}
@@ -457,11 +545,12 @@ export default function RepertoireTrainer({
               ],
             }}
           />
-        </Suspense>
+        </Suspense></>
       );
     }
     return (
       <div className="mx-auto max-w-[480px] rounded-xl border border-line bg-panel px-6 py-10 text-center">
+        {knownNotice && <p role="status" className="mb-3 text-[13px] text-accent">{knownNotice}</p>}
         <GraduationCap size={28} className="mx-auto text-accent" />
         <div className="mt-3 text-[17px] font-semibold">{endeTitel}</div>
         <div className="mt-1.5 text-[13px] text-ink3">{endeText}</div>
@@ -555,6 +644,9 @@ export default function RepertoireTrainer({
             >
               <Shuffle size={11} /> {t("rep.freeTag")}
             </span>
+          )}
+          {free && trainingPlies && (
+            <span>{t("rep.coveragePlies", { n: trainingPlies })} · {(streaksRef.current.get(item.node_id) ?? 0)} / 5</span>
           )}
           {idx + 1} / {items.length} {item.is_new && !free && t("rep.newTag")}
         </span>
@@ -744,6 +836,14 @@ export default function RepertoireTrainer({
           </div>
         )}
       </div>
+      {complete && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button onClick={() => setReplayNonce((value) => value + 1)}>{t("rep.reviewAgain")}</Button>
+          <Button primary onClick={advance}>{t("rep.nextVariant")}</Button>
+          <Button onClick={() => void addKnown()}>{t("rep.addKnowledge")}</Button>
+          {knownError && <span className="text-[12px] text-loss">{knownError}</span>}
+        </div>
+      )}
     </>
   );
 
@@ -800,6 +900,7 @@ export default function RepertoireTrainer({
     const eigenerName = item.side === "white" ? t("common.white") : t("common.black");
     const gegenName = item.side === "white" ? t("common.black") : t("common.white");
     return (
+      <>{knownNotice && <p role="status" className="mb-3 text-[13px] text-accent">{knownNotice}</p>}
       <Suspense fallback={<LeereSeite />}>
         <TrainerBlatt
           mobile={mobile}
@@ -857,6 +958,11 @@ export default function RepertoireTrainer({
             // Beide Wege stehen immer da, und der, der gerade gilt, ist der
             // bedienbare · sonst spränge die Reihe bei jeder Antwort um.
             schalter: [
+              ...(complete ? [
+                { label: t("rep.reviewAgain"), onClick: () => setReplayNonce((value) => value + 1) },
+                { label: t("rep.nextVariant"), betont: true, onClick: advance },
+                { label: t("rep.addKnowledge"), onClick: () => void addKnown() },
+              ] : [
               {
                 label: t("rep.reveal"),
                 titel: t("rep.revealShortcut"),
@@ -868,6 +974,7 @@ export default function RepertoireTrainer({
                 titel: t("rep.revealShortcut"),
                 onClick: state === "wrong" ? revealAndNext : undefined,
               },
+              ]),
             ],
             griffe: <FocusButton onClick={() => setFocused(true)} />,
             verlaufSchalter: [
@@ -917,13 +1024,14 @@ export default function RepertoireTrainer({
             },
           }}
         />
-      </Suspense>
+      </Suspense></>
     );
   }
 
   return (
     <div className="grid grid-cols-1 gap-6 min-[1180px]:grid-cols-[minmax(0,var(--board-edge))_minmax(0,1fr)]">
       <div className="max-w-[var(--board-edge)]">
+        {knownNotice && <p role="status" className="mb-3 text-[13px] text-accent">{knownNotice}</p>}
         {trainHead(false)}
         {trainBoard("rep-train")}
         {trainControls(false)}

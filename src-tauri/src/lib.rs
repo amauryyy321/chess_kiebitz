@@ -223,6 +223,15 @@ fn game_detail(db: tauri::State<db::Db>, id: i64) -> Result<db::GameRecord, Stri
 }
 
 #[tauri::command(async)]
+fn game_id_by_source(db: tauri::State<db::Db>, source: String, source_id: String) -> Result<Option<i64>, String> {
+    db.read(|conn| Ok(conn.query_row(
+        "SELECT id FROM games WHERE source = ?1 AND source_id = ?2",
+        rusqlite::params![source, source_id],
+        |row| row.get(0),
+    ).ok()))
+}
+
+#[tauri::command(async)]
 fn list_games_page(
     db: tauri::State<db::Db>,
     request: db::GamePageRequest,
@@ -773,6 +782,7 @@ pub fn run() {
             list_game_summaries,
             dashboard_data,
             game_detail,
+            game_id_by_source,
             list_games_page,
             upsert_games,
             set_game_note,
@@ -792,6 +802,8 @@ pub fn run() {
             insights::deep_insights,
             insights::study_metrics,
             repertoire::rep_list,
+            repertoire::rep_mark_known,
+            repertoire::rep_unmark_known,
             repertoire::rep_add_line,
             repertoire::rep_delete,
             repertoire::rep_due,
@@ -808,6 +820,7 @@ pub fn run() {
             repertoire::rep_export_pgn_file,
             puzzles::import_puzzles,
             puzzles::next_puzzle,
+            puzzles::puzzle_by_id,
             puzzles::record_attempt,
             puzzles::puzzle_stats,
             puzzles::puzzle_insights,

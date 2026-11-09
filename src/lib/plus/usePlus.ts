@@ -5,16 +5,7 @@
  * beantwortet die einzige Frage, die die Seiten stellen: Ist diese Funktion
  * freigeschaltet, und wenn nicht, wie erkläre ich das.
  */
-import { useEffect, useState } from "react";
-import {
-  featureUnlocked,
-  initPlus,
-  plusState,
-  refreshEntitlement,
-  subscribePlus,
-  type PlusState,
-} from "./store";
-import { claimsStillValid } from "./token";
+import type { PlusState } from "./store";
 import type { PlusFeature } from "./types";
 
 export interface PlusView extends PlusState {
@@ -27,56 +18,30 @@ export interface PlusView extends PlusState {
   has: (feature: PlusFeature) => boolean;
 }
 
-function view(state: PlusState): PlusView {
-  // Plus gilt genau dann, wenn der geprüfte Token noch läuft · dieselbe Regel
-  // wie für jedes einzelne Feature, damit Anzeige und Gate nie auseinanderlaufen.
-  const isPlus = Boolean(
-    state.claims && state.claims.plan === "plus" && claimsStillValid(state.claims)
-  );
-  return {
-    ...state,
-    isPlus,
-    isTrial: isPlus && state.claims?.trial === true,
-    trialEligible: state.account?.trial_eligible === true,
-    has: (feature) => featureUnlocked(feature, state),
-  };
-}
+const FREE_STATE: PlusState = {
+  loading: false,
+  signedIn: false,
+  account: null,
+  claims: null,
+  refreshing: false,
+  error: null,
+  fetchedAt: null,
+  resendAllowedAt: 0,
+};
+
+const FREE_VIEW: PlusView = {
+  ...FREE_STATE,
+  isPlus: false,
+  isTrial: false,
+  trialEligible: false,
+  has: (_feature) => true,
+};
 
 /**
- * Abonniert den Plus-Zustand.
- *
- * Der erste Aufruf stößt die Initialisierung an; alle weiteren teilen sie sich.
- * Beim erneuten Fokus des Fensters wird nachgefragt · nach der Rückkehr aus
- * dem Systembrowser ist das der Moment, in dem der Kauf ankommen kann.
+ * Alle Funktionen laufen ohne Anmeldung oder Netzwerk-Freischaltung.
  */
 export function usePlus(): PlusView {
-  const [state, setState] = useState<PlusState>(() => plusState());
-
-  useEffect(() => {
-    const unsubscribe = subscribePlus(setState);
-    setState(plusState());
-    void initPlus();
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Nach Checkout oder Portal kann `refresh_after` des vorherigen Tokens
-    // noch viele Stunden in der Zukunft liegen. Beim tatsächlichen Zurück-
-    // kehren in die App muss deshalb genau diese Schranke übergangen werden.
-    const onFocus = () => {
-      if (document.visibilityState !== "visible") return;
-      void refreshEntitlement({ force: true }).catch(() => {});
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
-    };
-  }, []);
-
-  return view(state);
+  return FREE_VIEW;
 }
 
 export interface FeatureGate {
@@ -99,7 +64,7 @@ export function usePlusGate(feature: PlusFeature): FeatureGate {
   const plus = usePlus();
   return {
     unlocked: plus.has(feature),
-    pending: plus.loading,
+    pending: false,
     plus,
   };
 }

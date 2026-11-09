@@ -142,7 +142,9 @@ export default function InsightsV2({
     };
   }, [desktop, tab, puzzles]);
 
-  const analysisRecords = desktop ? records : DEMO_RECORDS;
+  const analysisRecords = (desktop ? records : DEMO_RECORDS).filter(
+    (game) => !game.time_class.toLowerCase().startsWith("bullet")
+  );
   const live = useMemo(() => buildInsights(analysisRecords, locale), [analysisRecords, locale]);
   const deepData = useMemo(() => (desktop ? deep : demoDeepInsights()), [desktop, deep]);
   const puzzleData = desktop ? puzzles : demoPuzzleInsights();
@@ -559,6 +561,7 @@ export default function InsightsV2({
               )}
               {tab === "training" && (
                 <Training
+                  onOpenPuzzles={openPuzzles}
                   deep={deepData}
                   puzzles={puzzleData}
                   findings={findingsFor(findings, "training")}

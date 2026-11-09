@@ -30,7 +30,10 @@ pub async fn deep_insights(app: tauri::AppHandle) -> Result<DeepInsights, String
 }
 
 fn compute(conn: &Connection) -> Result<DeepInsights, String> {
-    let games = load_games(conn)?;
+    let games: Vec<RawGame> = load_games(conn)?
+        .into_iter()
+        .filter(|game| !game.time_class.to_ascii_lowercase().starts_with("bullet"))
+        .collect();
     let evals = load_evals(conn)?;
     let puzzle_days = load_puzzle_days(conn)?;
     let nodes = repertoire::load_nodes(conn).unwrap_or_default();

@@ -20,6 +20,7 @@ import {
   type EndgameCategory,
   type EndgameDrill,
 } from "../data/endgames";
+import { ENDGAME_VIDEOS } from "../data/endgameVideos";
 import { useBackendInfo } from "../lib/backend";
 import { useI18n, type Key } from "../lib/i18n";
 import { endgameMove, endgameRecord, endgameStats, type DrillStat } from "../lib/endgame";
@@ -31,7 +32,7 @@ import { BOARD_MAX } from "../lib/boardLayout";
 import { moveTargetStyles } from "../lib/boardMoves";
 import { randomDrill } from "../lib/randomEndgame";
 import { useTrainingSession } from "../lib/session";
-import { Button, Card, Disclosure, Menu, MenuItem } from "../components/ui";
+import { Button, Card, Disclosure, ExtLink, Menu, MenuItem } from "../components/ui";
 import FocusBoard, { FocusButton, FocusMenuItem } from "../components/FocusBoard";
 import { deInt } from "../lib/format";
 import { maybeRequestPlayReview } from "../lib/reviewPrompt";
@@ -93,6 +94,7 @@ export default function Endgame({ initialCategory }: { initialCategory?: Endgame
   const [hintOpen, setHintOpen] = useState(false);
   const [shake, setShake] = useState(false);
   const [stats, setStats] = useState<Record<string, DrillStat>>({});
+  const [reviewOnly, setReviewOnly] = useState(false);
   const [sharing, setSharing] = useState<ShareSubject | null>(null);
   /** Brett allein · siehe components/FocusBoard.tsx. */
   const [focused, setFocused] = useState(false);
@@ -285,6 +287,14 @@ export default function Endgame({ initialCategory }: { initialCategory?: Endgame
   const mastered = useMemo(
     () => ENDGAME_DRILLS.filter((d) => (stats[d.id]?.solved ?? 0) > 0).length,
     [stats]
+  );
+  const video = ENDGAME_VIDEOS[drill.id];
+  const videoLink = video ? <div className="mt-3 rounded-lg border border-line bg-panel2 p-3 text-[12px] text-ink3">
+    <p>{locale === "fr" ? video.fr : video.en}</p>
+    <ExtLink href={video.url} label={t("eg.watchVideo")} />
+  </div> : null;
+  const shownDrills = (category: EndgameCategory) => ENDGAME_DRILLS.filter((item) =>
+    item.category === category && (!reviewOnly || (stats[item.id]?.solved ?? 0) === 0 || (stats[item.id]?.attempts ?? 0) > (stats[item.id]?.solved ?? 0))
   );
 
   // Der Drill spielt sich selbst aus · was am Ende steht, sagt die Stellung.
@@ -483,6 +493,7 @@ export default function Endgame({ initialCategory }: { initialCategory?: Endgame
             >
               {drillText(drill.hint, locale)}
             </Disclosure>
+            {videoLink}
           </>
         )}
       </div>
@@ -494,6 +505,9 @@ export default function Endgame({ initialCategory }: { initialCategory?: Endgame
     const gegenName = desktop ? t("blatt.engine") : drill.side === "white" ? t("common.black") : t("common.white");
     return (
       <Suspense fallback={<LeereSeite />}>
+        <div className="px-4 pt-3"><Button onClick={() => setReviewOnly((value) => !value)}>
+          {reviewOnly ? t("eg.showAll") : t("eg.reviewOnly")}
+        </Button></div>
         <EndgameBlatt
           mobile={mobile}
           felder={[
@@ -530,10 +544,10 @@ export default function Endgame({ initialCategory }: { initialCategory?: Endgame
           hinweis={drillText(drill.hint, locale)}
           hinweisOffen={hintOpen}
           onHinweis={() => setHintOpen((offen) => !offen)}
-          fussnote={t("eg.engineNote")}
+          fussnote={<>{t("eg.engineNote")}{videoLink}</>}
           gruppen={CATEGORY_ORDER.map((cat) => ({
             titel: t(CATEGORY_KEY[cat]),
-            eintraege: ENDGAME_DRILLS.filter((d) => d.category === cat).map((d) => ({
+            eintraege: shownDrills(cat).map((d) => ({
               id: d.id,
               name: drillText(d.name, locale),
               ziel: d.goal === "win" ? "1" : "½",
@@ -642,6 +656,9 @@ export default function Endgame({ initialCategory }: { initialCategory?: Endgame
           </Card>
 
           <Card title={t("eg.drills")}>
+            <Button onClick={() => setReviewOnly((value) => !value)} className="mb-3">
+              {reviewOnly ? t("eg.showAll") : t("eg.reviewOnly")}
+            </Button>
             <div className="flex flex-col gap-4">
               {CATEGORY_ORDER.map((cat) => (
                 <div key={cat}>
@@ -649,7 +666,7 @@ export default function Endgame({ initialCategory }: { initialCategory?: Endgame
                     {t(CATEGORY_KEY[cat])}
                   </div>
                   <div className="flex flex-col gap-1">
-                    {ENDGAME_DRILLS.filter((d) => d.category === cat).map((d) => {
+                    {shownDrills(cat).map((d) => {
                       const st = stats[d.id];
                       const done = (st?.solved ?? 0) > 0;
                       const active = d.id === drill.id;
