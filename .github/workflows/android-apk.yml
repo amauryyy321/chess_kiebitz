@@ -177,3 +177,6 @@ jobs:
           cp "$apk" "$out"
           echo "Lade $out ($(du -h "$out" | cut -f1)) zu Release $TAG"
           gh release upload "$TAG" "$out" --clobber
+          printf '{"version":"%s"}\n' "$version" > latest.json
+          gh release upload "$TAG" latest.json --clobber
+          gh release edit "$TAG" --draft=false
