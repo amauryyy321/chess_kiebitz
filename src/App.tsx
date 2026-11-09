@@ -187,6 +187,15 @@ export default function App() {
   const { route, depth, navigate: switchTo, push: pushLevel, back, setNavigationLocked } = useNavStack();
   const page = route.page;
   const [playLocked, setPlayLocked] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [mobileMenuOpen]);
   const [onlineResult, setOnlineResult] = useState<OnlineResult | null>(null);
   const unlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (unlockTimer.current) clearTimeout(unlockTimer.current); }, []);
@@ -1035,7 +1044,14 @@ export default function App() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Auch die App-Bar wechselt mit dem Modus · sie ist Hülle, und die
               Hülle wechselt vollständig: Register unten, Kolumnentitel oben. */}
-          {diagramMode ? (
+          <div className="flex shrink-0 items-stretch">
+          <button type="button" aria-label={t("app.menu")} aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen(true)}
+            className="shrink-0 border-b border-line bg-panel px-3 text-ink2"
+            style={{ paddingTop: "env(safe-area-inset-top)" }}>
+            <Menu size={22} />
+          </button>
+          <div className="min-w-0 flex-1">{diagramMode ? (
             <RegisterAppBar
               title={barTitle}
               showBack={showBack}
@@ -1051,7 +1067,7 @@ export default function App() {
               onSettings={() => navigate("settings")}
               settingsActive={page === "settings"}
             />
-          )}
+          )}</div></div>
           {/* Der Wrapper spannt genau die Fläche von <main> auf · darin legt
               sich das Detailblatt (MobileSheet) über den Inhalt, während
               App-Bar und Navigation scharf und bedienbar bleiben. */}
@@ -1070,6 +1086,28 @@ export default function App() {
           {showAds && <AdBanner android={backend.info?.platform === "android"} />}
         </div>
         {!rail && bottomBar(false)}
+        {mobileMenuOpen && (
+          <div role="dialog" aria-modal="true" aria-label={t("nav.main")}
+            className="fixed inset-0 z-[100] flex flex-col bg-panel/95 backdrop-blur-sm"
+            style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+            <div className="flex items-center justify-between border-b border-line px-5 py-3">
+              <span className="text-[17px] font-semibold">{t("app.menu")}</span>
+              <button type="button" aria-label={t("common.close")} onClick={() => setMobileMenuOpen(false)}
+                className="rounded-lg p-2 text-ink2 hover:bg-panel2"><X size={22} /></button>
+            </div>
+            <nav aria-label={t("nav.main")} className="grid flex-1 content-start gap-1 overflow-y-auto p-4 sm:grid-cols-2">
+              {[...nav, { id: "play" as PageId, labelKey: "play.title" as Key, icon: Swords },
+                { id: "settings" as PageId, labelKey: "nav.settings" as Key, icon: SettingsIcon }].map(({ id, labelKey, icon: Icon }) => (
+                <button key={id} type="button" disabled={id === "online" && playLocked}
+                  aria-current={page === id ? "page" : undefined}
+                  onClick={() => { setMobileMenuOpen(false); navigate(id); }}
+                  className="flex min-h-12 items-center gap-3 rounded-lg px-4 py-2 text-left text-ink hover:bg-panel2 disabled:opacity-50">
+                  <Icon size={19} className="shrink-0 text-accent" />{t(labelKey)}
+                </button>
+              ))}
+            </nav>
+          </div>
+        )}
         {overlays}
       </div>
       </ShellProvider>

@@ -178,7 +178,7 @@ function pageTitle() {
 }
 
 describe("mobile navigation", () => {
-  it("replaces the drawer with an app bar carrying title, back and settings", async () => {
+  it("shows a menu button alongside the app bar", async () => {
     // Der Claim wird beim Start gezogen · für den Test wird die Wahl auf den
     // ersten Satz festgelegt, sonst stünde in jedem Lauf ein anderer da.
     resetTagline();
@@ -189,22 +189,31 @@ describe("mobile navigation", () => {
     });
     await screen.findByText("Dashboard", { selector: "div" });
     await screen.findByRole("button", { name: "Partien" });
-    // Weder Hamburger noch Sidebar · die Leiste trägt die Ziele.
-    expect(screen.queryByRole("button", { name: "Menü" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Menü" })).toBeTruthy();
     expect(container.querySelector("aside")).toBeNull();
 
     const header = container.querySelector("header") as HTMLElement;
     const bar = within(header);
     // Die Marke steht auf jedem Tab; auf dem Start ergänzt sie der Claim.
     expect(header.textContent).toContain("Kiebitz · Zug um Zugvogel");
-    // Daneben steht das Modell · ohne Konto ist das Free.
-    expect(bar.getByLabelText("Aktuelles Modell: Free")).toBeTruthy();
     expect(bar.queryByRole("button", { name: "Zurück" })).toBeNull();
 
     fireEvent.click(bottomBar().getByRole("button", { name: "Partien" }));
     expect(header.textContent).toContain("Kiebitz · Partien");
     // Hauptziele erreicht man über die Leiste · dort ist kein Pfeil nötig.
     expect(bar.queryByRole("button", { name: "Zurück" })).toBeNull();
+  });
+
+  it("opens all destinations and navigates to the repertoire", async () => {
+    render(<LocaleProvider><App /></LocaleProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Menü" }));
+    const menu = within(screen.getByRole("dialog", { name: "Hauptnavigation" }));
+    for (const label of ["Spielen", "Wissensbasis", "Repertoire", "Gegen die Engine", "Einstellungen"]) {
+      expect(menu.getByRole("button", { name: label })).toBeTruthy();
+    }
+    fireEvent.click(menu.getByRole("button", { name: "Repertoire" }));
+    expect(await screen.findByText("Repertoire", { selector: "div" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Hauptnavigation" })).toBeNull();
   });
 
   it("opens the settings from the app bar and offers a way back", async () => {
