@@ -480,7 +480,7 @@ export default function Analysis({
   /** Stellung aus einem geteilten Link · sie eröffnet das freie Brett. */
   shared?: SharePayload | null;
   /** Eine Zugfolge ab einer Stellung · etwa die Partie gegen die Engine. */
-  line?: { fen: string; sans: string[]; chess960: boolean } | null;
+  line?: { fen: string; sans: string[]; chess960: boolean; orientation?: "white" | "black"; expectedMove?: string } | null;
   /**
    * Gegen die Engine weiterspielen, was auf dem Brett steht · Ausgangsstellung
    * und die Züge bis zur gezeigten Stellung, damit die Mitschrift weiterläuft.
@@ -707,7 +707,7 @@ export default function Analysis({
   // Eine Zugfolge ab einer Stellung · aufs freie Brett, am Ende stehend.
   useEffect(() => {
     if (!line) return;
-    setOpened({ kind: "analysis", fen: line.fen, orientation: "white" });
+    setOpened({ kind: "analysis", fen: line.fen, orientation: line.orientation ?? "white" });
     setSelectedId(null);
     setFlipped(false);
     setScratchSans(line.sans);
@@ -2288,7 +2288,7 @@ export default function Analysis({
           onPieceDrop={scratch || live ? playBoardMove : undefined}
           onSquareClick={scratch || live ? onBoardSquareClick : undefined}
           lastMove={boardLastMove}
-          squareStyles={selectionStyles(fen, scratchSelected)}
+          squareStyles={{ ...(line?.expectedMove && fen === line.fen ? { [line.expectedMove.slice(0, 2)]: { backgroundColor: "rgba(80, 180, 100, 0.6)" }, [line.expectedMove.slice(2, 4)]: { backgroundColor: "rgba(80, 180, 100, 0.6)" } } : {}), ...selectionStyles(fen, scratchSelected) }}
           arrows={retryVerdeckt ? [] : variation || scratch ? liveArrows : previewArrows}
           badges={currentQuality && currentTarget ? [{
             // Der Schlüssel trägt den Halbzug · so geht der Marker auch dann

@@ -61,13 +61,14 @@ vi.mock("../lib/puzzles", async (importOriginal) => ({
   recordAttempt: (...args: unknown[]) => mocks.recordAttempt(...args),
 }));
 vi.mock("../components/Board", () => ({
-  default: ({ fen, onPieceDrop, draggable, muted, mouseDrag, arrows, badges, orientation }: {
+  default: ({ fen, onPieceDrop, draggable, muted, mouseDrag, arrows, badges, orientation, squareStyles }: {
     fen: string;
     onPieceDrop?: (from: string, to: string) => boolean;
     draggable?: boolean;
     muted?: boolean;
     mouseDrag?: boolean;
     orientation?: string;
+    squareStyles?: Record<string, unknown>;
     arrows?: unknown[];
     // `label` kann ein React-Element sein (Buch-Symbol) · nicht serialisierbar.
     badges?: { square: string; color: string; title?: string }[];
@@ -76,6 +77,7 @@ vi.mock("../components/Board", () => ({
       data-testid="analysis-board"
       data-fen={fen}
       data-orientation={orientation}
+      data-square-styles={JSON.stringify(squareStyles ?? {})}
       data-draggable={String(!!draggable)}
       data-mouse-drag={String(!!mouseDrag)}
       data-muted={String(!!muted)}
@@ -290,6 +292,14 @@ const betterLineRows = [
 ];
 
 describe("Analysis page", () => {
+  it("opens a black puzzle at its position and highlights the expected move", async () => {
+    const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+    render(<LocaleProvider><Analysis targetGameId={null} line={{ fen, sans: [], chess960: false, orientation: "black", expectedMove: "e7e5" }} /></LocaleProvider>);
+    await waitFor(() => expect(screen.getAllByTestId("analysis-board")[0].dataset.fen).toBe(fen));
+    const board = screen.getAllByTestId("analysis-board")[0];
+    expect(board.dataset.orientation).toBe("black");
+    expect(Object.keys(JSON.parse(board.dataset.squareStyles ?? "{}"))).toEqual(expect.arrayContaining(["e7", "e5"]));
+  });
   it("opens a playable new game when entered without a target", async () => {
     render(<LocaleProvider><Analysis targetGameId={null} /></LocaleProvider>);
 

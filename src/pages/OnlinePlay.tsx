@@ -58,7 +58,7 @@ function fallbackRecord(full: BoardGameFull, state: BoardGameState, user: string
     termination: state.status === "resign" ? "resign" : state.status === "mate" ? "mate" : "",
     opening: "", eco: "", moves_count: Math.ceil(chess.history().length / 2), accuracy: null,
     moves: chess.history().join(" "), note: "", analyzed: false,
-    variant: "standard", start_fen: "", time_control: `${Math.round((full as BoardGameFull & { clock?: { initial: number } }).clock?.initial ?? 300000) / 1000}+0`,
+    variant: "standard", start_fen: "", time_control: `${Math.round(full.clock?.initial ?? 300000) / 1000}+${Math.round((full.clock?.increment ?? 0) / 1000)}`,
   };
 }
 
@@ -79,6 +79,7 @@ export default function OnlinePlay({
   const [seeking, setSeeking] = useState<5 | 10 | null>(null);
   const [busyMove, setBusyMove] = useState(false);
   const [premoves, setPremoves] = useState<Premove[]>([]);
+  const [pendingMove, setPendingMove] = useState<{ ply: number; fen: string } | null>(null);
   const submittedAtPly = useRef<number | null>(null);
   const [viewPly, setViewPly] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -89,6 +90,7 @@ export default function OnlinePlay({
   useEffect(() => {
     setViewPly(null);
     setPremoves([]);
+    setPendingMove(null);
     submittedAtPly.current = null;
   }, [gameId]);
   useEffect(() => {
@@ -233,20 +235,24 @@ export default function OnlinePlay({
     return steps;
   }, [state?.moves]);
   const livePly = positions.length - 1;
+  useEffect(() => {
+    setPendingMove((pending) => pending && livePly > pending.ply ? null : pending);
+  }, [livePly]);
   const shownPly = viewPly == null ? livePly : Math.min(viewPly, livePly);
   const shown = positions[shownPly];
   const reviewing = shownPly < livePly;
   const showPly = (ply: number) => setViewPly(ply >= livePly ? null : ply);
   const color = !full || full.white.id.toLowerCase() === user.toLowerCase() ? "white" : "black";
-  const myTurn = chess.turn() === (color === "white" ? "w" : "b");
+  const myTurn = !pendingMove && chess.turn() === (color === "white" ? "w" : "b");
+  const liveFen = pendingMove && livePly === pendingMove.ply ? pendingMove.fen : shown.fen;
   const active = state?.status === "started";
   const plannedFen = useMemo(() => {
     if (!active || myTurn || reviewing) return shown.fen;
-    try { return projectPremoves(shown.fen, color, premoves); }
-    catch { return shown.fen; }
-  }, [active, myTurn, reviewing, shown.fen, color, premoves]);
+    try { return projectPremoves(liveFen, color, premoves); }
+    catch { return liveFen; }
+  }, [active, myTurn, reviewing, shown.fen, liveFen, color, premoves]);
   const queuePremove = (from: string, to: string): boolean => {
-    if (!active || myTurn || reviewing || busyMove) return false;
+    if (!active || myTurn || reviewing) return false;
     const planned = makePremove(plannedFen, color, from, to);
     if (!planned) return false;
     setPremoves((current) => [...current, planned]);
@@ -266,11 +272,15 @@ export default function OnlinePlay({
       setError("La suite anticipée n'est plus légale dans la position reçue. Elle a été annulée.");
       return;
     }
+    const optimistic = new Chess(chess.fen());
+    optimistic.move({ from: planned.from, to: planned.to, promotion: planned.uci[4] ?? "q" });
+    setPendingMove({ ply, fen: optimistic.fen() });
+    setPremoves((current) => current.slice(1));
     setBusyMove(true);
     void boardMove(token, gameId, planned.uci)
-      .then(() => setPremoves((current) => current.slice(1)))
       .catch((reason) => {
         setPremoves([]);
+        setPendingMove(null);
         setError(`Coup anticipé refusé par Lichess : ${String(reason)}`);
       })
       .finally(() => setBusyMove(false));
@@ -286,20 +296,21 @@ export default function OnlinePlay({
   const submit = (from: string, to: string): boolean => {
     if (!token || !gameId || !active || !myTurn || busyMove || reviewing) return false;
     let uci = `${from}${to}`;
+    const probe = new Chess(chess.fen());
     try {
-      const probe = new Chess(chess.fen());
       const move = probe.move({ from, to, promotion: "q" });
       if (move.promotion) uci += move.promotion;
     } catch { return false; }
+    setPendingMove({ ply: livePly, fen: probe.fen() });
     setBusyMove(true);
     void boardMove(token, gameId, uci)
-      .catch((reason) => setError(`Coup refusé par Lichess : ${String(reason)}`))
+      .catch((reason) => { setPendingMove(null); setPremoves([]); setError(`Coup refusé par Lichess : ${String(reason)}`); })
       .finally(() => setBusyMove(false));
     return true;
   };
-  const planning = !!active && !myTurn && !busyMove && !reviewing;
+  const planning = !!active && !myTurn && !reviewing;
   const boardFen = planning ? plannedFen : shown.fen;
-  const selection = useBoardSelection(boardFen, myTurn ? submit : queuePremove, !!active && !busyMove && !reviewing && (!myTurn || premoves.length === 0));
+  const selection = useBoardSelection(boardFen, myTurn ? submit : queuePremove, !!active && !reviewing && (!myTurn || (!busyMove && premoves.length === 0)));
   const squareStyles = {
     ...(shown.lastMove ? {
       [shown.lastMove.from]: { backgroundColor: LAST_MOVE_YELLOW },
@@ -322,18 +333,26 @@ export default function OnlinePlay({
   };
   const status = full ? active ? myTurn ? "À toi de jouer" : "Au tour de l'adversaire" : "Partie terminée · enregistrement et analyse en cours"
     : gameId ? "Connexion à la partie Lichess …"
-    : seeking ? `Recherche d'un adversaire pour ${seeking} minutes …`
-    : token ? "Choisis 5 ou 10 minutes pour chercher un adversaire." : "Connecte ton compte Lichess dans les réglages.";
+    : seeking ? `Recherche d'un adversaire en ${seeking === 5 ? "5 + 5" : "10 + 0"} …`
+    : token ? "Choisis une cadence pour chercher un adversaire." : "Connecte ton compte Lichess dans les réglages.";
 
   return (
     <div className="mx-auto max-w-[1320px] px-4 py-6 sm:px-6">
       <h1 className="page-title mb-5 flex items-center gap-2 text-[21px] font-semibold"><Swords size={20} /> Jouer sur Lichess</h1>
+                {!gameId && (
+            <div className="flex flex-wrap gap-2 border-b border-line px-4 py-4">
+              <Button primary onClick={() => startSeek(5)} disabled={!user || !!seeking}>5 + 5 · classée</Button>
+              <Button onClick={() => startSeek(10)} disabled={!user || !!seeking}>Jouer · 10 + 0 classée</Button>
+              {seeking && <Button onClick={() => seekAbort.current?.abort()}>Annuler <Loader2 size={14} className="animate-spin" /></Button>}
+              <p className="w-full text-[12px] text-ink3">5 + 5 : 5 minutes et 5 secondes ajoutées après chaque coup.</p>
+            </div>
+          )}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,640px)_minmax(300px,1fr)]">
         <div className="min-w-0 space-y-2.5">
           <PlayerBar name={opponent?.name ?? "Adversaire"} rating={opponent?.rating}
             clock={currentClock(topColor)} moving={!!active && chess.turn() === (topColor === "white" ? "w" : "b")} mine={false} />
           <Board boardId="lichess-online" fen={boardFen} width={640} orientation={color}
-            draggable={!!active && !busyMove && !reviewing && (!myTurn || premoves.length === 0)} onPieceDrop={myTurn ? submit : queuePremove}
+            draggable={!!active && !reviewing && (!myTurn || (!busyMove && premoves.length === 0))} onPieceDrop={myTurn ? submit : queuePremove}
             onSquareClick={selection.onSquareClick} squareStyles={squareStyles} mouseDrag />
           {reviewing && <p role="status" className="rounded-lg border border-line bg-panel2 px-3 py-2 text-[12px] text-ink2">Tu regardes une ancienne position. La partie et les pendules continuent en direct.</p>}
           {active && premoves.length > 0 && <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-panel2 px-3 py-2 text-[12px] text-ink2">
@@ -353,13 +372,7 @@ export default function OnlinePlay({
             <p role="status" className="mt-2 text-[13px] text-ink2">{status}</p>
           </div>
           {!token && <p className="px-4 py-3 text-[13px] text-ink3">Ajoute un jeton Lichess autorisé pour « board:play » dans les réglages.</p>}
-          {token && !gameId && (
-            <div className="flex flex-wrap gap-2 border-b border-line px-4 py-4">
-              <Button primary onClick={() => startSeek(5)} disabled={!user || !!seeking}>5 minutes · classée</Button>
-              <Button onClick={() => startSeek(10)} disabled={!user || !!seeking}>10 minutes · classée</Button>
-              {seeking && <Button onClick={() => seekAbort.current?.abort()}>Annuler <Loader2 size={14} className="animate-spin" /></Button>}
-            </div>
-          )}
+
           <div className="min-h-[220px] px-4 py-3">
             <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wide text-ink3">
               <span>Coups joués</span>

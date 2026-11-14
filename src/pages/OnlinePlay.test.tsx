@@ -53,11 +53,11 @@ describe("Jouer dans Kiebitz", () => {
     expect(screen.getByTestId("online-board").dataset.orientation).toBe("white");
     expect(screen.getAllByText("Adversaire").length).toBeGreaterThan(0);
     expect(screen.getByText("Coups joués")).toBeTruthy();
-    const fiveMinutes = await screen.findByRole("button", { name: /5 minutes/ }) as HTMLButtonElement;
+    const fiveMinutes = await screen.findByRole("button", { name: /5 \+ 5/ }) as HTMLButtonElement;
     await waitFor(() => expect(fiveMinutes.disabled).toBe(false));
     fireEvent.click(fiveMinutes);
     expect(screen.getByTestId("online-board")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("Recherche d'un adversaire pour 5 minutes");
+    expect(screen.getByRole("status").textContent).toContain("Recherche d'un adversaire en 5 + 5");
     expect(mocks.seek).toHaveBeenCalledWith("test-token", 5, expect.any(AbortSignal));
 
     await waitFor(() => expect(mocks.start).not.toBeNull());
@@ -109,6 +109,26 @@ describe("Jouer dans Kiebitz", () => {
     act(() => mocks.gameEvent?.({ ...started, moves: "e2e4 e7e5 g1f3 d7d6" }));
     await waitFor(() => expect(mocks.move).toHaveBeenCalledWith("test-token", "game123", "d2d4"));
     expect(mocks.move).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a submitted move immediately and allows a premove while awaiting Lichess", async () => {
+    let rejectMove!: (reason: Error) => void;
+    mocks.move.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectMove = reject; }));
+    render(<OnlinePlay onRecorded={vi.fn()} onConnectionIssue={vi.fn()} />);
+    await waitFor(() => expect(mocks.start).not.toBeNull());
+    act(() => mocks.start?.("game123"));
+    await waitFor(() => expect(mocks.gameEvent).not.toBeNull());
+    act(() => mocks.gameEvent?.({ type: "gameFull", id: "game123",
+      white: { id: "me", name: "Me", rating: 1500 }, black: { id: "them", name: "Them", rating: 1500 },
+      state: { type: "gameState", moves: "e2e4 e7e5", status: "started", wtime: 300000, btime: 300000 } }));
+    fireEvent.click(screen.getByRole("button", { name: "Board g1f3" }));
+    const board = screen.getByTestId("online-board");
+    expect(new Chess(board.dataset.fen).get("f3")?.type).toBe("n");
+    fireEvent.click(screen.getByRole("button", { name: "Board d2d4" }));
+    expect(screen.getByText(/1 coup anticipé en attente/)).toBeTruthy();
+    await act(async () => rejectMove(new Error("refus")));
+    expect(new Chess(board.dataset.fen).get("g1")?.type).toBe("n");
+    expect(screen.queryByText(/coup anticipé en attente/)).toBeNull();
   });
 
   it("reports the result after saving so analysis can start behind the dialog", async () => {

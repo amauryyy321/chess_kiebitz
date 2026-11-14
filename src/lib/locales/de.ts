@@ -53,6 +53,7 @@ export const de = {
   "nav.games": "Partien",
   "nav.analysis": "Analyse",
   "nav.online": "Spielen",
+  "nav.videos": "Videos",
   "nav.knowledge": "Wissensbasis",
   "nav.repertoire": "Repertoire",
   "nav.puzzles": "Puzzles",

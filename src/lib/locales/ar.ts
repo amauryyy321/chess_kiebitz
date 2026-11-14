@@ -42,6 +42,7 @@ export const ar: Record<Key, string> = {
   "nav.games": "المباريات",
   "nav.analysis": "التحليل",
   "nav.online": "العب",
+  "nav.videos": "الفيديوهات",
   "nav.knowledge": "قاعدة المعرفة",
   "nav.repertoire": "الافتتاحيات",
   "nav.puzzles": "الألغاز",

@@ -4,17 +4,17 @@ import { boardPlaying, readBoardStream, seekRatedGame } from "./lichessBoard";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Lichess Board API", () => {
-  it("submits a rated 5+0 standard seek and keeps its stream open", async () => {
+  it.each([[5, "5"], [10, "0"]] as const)("submits a rated %i minute seek with increment %s", async (minutes, increment) => {
     const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
       const form = init.body as URLSearchParams;
-      expect(form.get("time")).toBe("5");
-      expect(form.get("increment")).toBe("0");
+      expect(form.get("time")).toBe(String(minutes));
+      expect(form.get("increment")).toBe(increment);
       expect(form.get("rated")).toBe("true");
       expect(form.get("variant")).toBe("standard");
       return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("\n")); controller.close(); } }));
     });
     vi.stubGlobal("fetch", fetcher);
-    await seekRatedGame("test-token", 5, new AbortController().signal);
+    await seekRatedGame("test-token", minutes, new AbortController().signal);
     expect(fetcher).toHaveBeenCalledWith("https://lichess.org/api/board/seek", expect.any(Object));
   });
 

@@ -278,7 +278,7 @@ describe("Puzzle training", () => {
 
     fireEvent.click(griff("play a3"));
     await waitFor(() => expect(mocks.recordAttempt).toHaveBeenCalledWith("test-puzzle", false));
-    expect(openAnalysis).toHaveBeenCalledWith({ fen: initialFen, sans: ["e4", "e5", "Nf3", "Nc6"], chess960: false }, true, 120);
+    expect(openAnalysis).toHaveBeenCalledWith({ fen: initialFen, sans: ["e4", "e5", "Nf3", "Nc6"], chess960: false, orientation: "white", expectedMove: "e2e4" }, true, 120);
   });
 
   it("keeps analysis closed after a wrong move when review is set to zero", async () => {

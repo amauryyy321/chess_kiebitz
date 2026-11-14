@@ -14,6 +14,7 @@ export interface BoardGameFull {
   white: { id: string; name: string; rating: number };
   black: { id: string; name: string; rating: number };
   state: BoardGameState;
+  clock?: { initial: number; increment: number };
 }
 
 export interface BoardGameStart { type: "gameStart"; game: { id: string } }
@@ -32,7 +33,7 @@ async function request(token: string, path: string, init: RequestInit = {}): Pro
 
 /** Keep the response body open: closing it cancels the public seek. */
 export async function seekRatedGame(token: string, minutes: 5 | 10, signal: AbortSignal): Promise<void> {
-  const body = new URLSearchParams({ time: String(minutes), increment: "0", rated: "true", variant: "standard" });
+  const body = new URLSearchParams({ time: String(minutes), increment: minutes === 5 ? "5" : "0", rated: "true", variant: "standard" });
   const response = await request(token, "/api/board/seek", {
     method: "POST", body, signal,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },

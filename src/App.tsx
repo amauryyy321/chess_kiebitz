@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Settings as SettingsIcon,
   Swords,
+  Video,
   X,
 } from "lucide-react";
 import { useBackendInfo } from "./lib/backend";
@@ -88,6 +89,7 @@ const pageLoaders = {
   analysis: () => import("./pages/Analysis"),
   play: () => import("./pages/Play"),
   online: () => import("./pages/OnlinePlay"),
+  videos: () => import("./pages/Videos"),
   repertoire: () => import("./pages/Repertoire"),
   knowledge: () => import("./pages/Knowledge"),
   endgame: () => import("./pages/Endgame"),
@@ -103,6 +105,7 @@ const Games = lazy(pageLoaders.games);
 const Analysis = lazy(pageLoaders.analysis);
 const Play = lazy(pageLoaders.play);
 const OnlinePlay = lazy(pageLoaders.online);
+const Videos = lazy(pageLoaders.videos);
 const Repertoire = lazy(pageLoaders.repertoire);
 const Knowledge = lazy(pageLoaders.knowledge);
 const Endgame = lazy(pageLoaders.endgame);
@@ -120,6 +123,7 @@ const LIKELY_NEXT_PAGES: Record<PageId, PageId[]> = {
   analysis: ["games", "insights"],
   play: ["analysis", "games"],
   online: ["analysis", "games"],
+  videos: ["study"],
   repertoire: ["study", "games"],
   knowledge: ["repertoire", "analysis"],
   endgame: ["study", "puzzles"],
@@ -148,6 +152,7 @@ const nav: { id: PageId; labelKey: Key; icon: typeof LayoutDashboard }[] = [
   { id: "games", labelKey: "nav.games", icon: Database },
   { id: "analysis", labelKey: "nav.analysis", icon: Activity },
   { id: "online", labelKey: "nav.online", icon: Swords },
+  { id: "videos", labelKey: "nav.videos", icon: Video },
   { id: "repertoire", labelKey: "nav.repertoire", icon: BookOpen },
   { id: "knowledge", labelKey: "nav.knowledge", icon: GraduationCap },
   { id: "puzzles", labelKey: "nav.puzzles", icon: PuzzleIcon },
@@ -897,6 +902,7 @@ export default function App() {
           }}
         />
       )}
+      {page === "videos" && <Videos />}
       {page === "repertoire" && <Repertoire />}
       {page === "knowledge" && <Knowledge />}
       {page === "endgame" && <Endgame initialCategory={route.endgameCategory} />}

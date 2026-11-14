@@ -42,6 +42,7 @@ export const zh: Record<Key, string> = {
   "nav.games": "对局",
   "nav.analysis": "分析",
   "nav.online": "对弈",
+  "nav.videos": "视频",
   "nav.knowledge": "知识库",
   "nav.repertoire": "开局库",
   "nav.puzzles": "战术题",

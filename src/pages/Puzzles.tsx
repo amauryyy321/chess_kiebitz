@@ -72,7 +72,7 @@ export interface PuzzleEntry {
   initialMinRating?: number;
   initialMaxRating?: number;
   /** Ouvre la position de l'exercice dans l'analyse. */
-  openAnalysis?: (line: { fen: string; sans: string[]; chess960: boolean }, failed?: boolean, seconds?: number) => void;
+  openAnalysis?: (line: { fen: string; sans: string[]; chess960: boolean; orientation?: "white" | "black"; expectedMove?: string }, failed?: boolean, seconds?: number) => void;
 }
 
 export default function Puzzles({
@@ -404,14 +404,14 @@ function TrainerView({
         failedRef.current = true;
         finish(false);
         if (reviewSeconds > 0 && openAnalysis) {
-          const problemFen = historyRef.current[puzzle.setup_plies] ?? puzzle.fen;
+          const problemFen = historyRef.current[idxRef.current] ?? puzzle.fen;
           const solution = new Chess(problemFen);
           const sans: string[] = [];
-          for (const uci of puzzle.moves.slice(puzzle.setup_plies)) {
+          for (const uci of puzzle.moves.slice(idxRef.current)) {
             try { sans.push(solution.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san); }
             catch { break; }
           }
-          openAnalysis({ fen: problemFen, sans, chess960: false }, true, reviewSeconds);
+          openAnalysis({ fen: problemFen, sans, chess960: false, orientation, expectedMove: puzzle.moves[idxRef.current] }, true, reviewSeconds);
         }
       }
       return false;
@@ -819,8 +819,8 @@ function TrainerView({
     // Pour un exercice Lichess, le premier coup est la mise en place jouée par
     // l'adversaire. L'analyse doit s'ouvrir sur la position à résoudre, après
     // ce coup, et non sur la position antérieure.
-    const problemFen = positionHistory[puzzle.setup_plies] ?? puzzle.fen;
-    openAnalysis({ fen: problemFen, sans: [], chess960: false });
+    const problemFen = positionHistory[viewPly] ?? puzzle.fen;
+    openAnalysis({ fen: problemFen, sans: [], chess960: false, orientation, expectedMove: puzzle.moves[viewPly] });
   };
 
   /**

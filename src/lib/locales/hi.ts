@@ -42,6 +42,7 @@ export const hi: Record<Key, string> = {
   "nav.games": "बाज़ियाँ",
   "nav.analysis": "विश्लेषण",
   "nav.online": "खेलें",
+  "nav.videos": "वीडियो",
   "nav.knowledge": "ज्ञान आधार",
   "nav.repertoire": "रेपर्टवार",
   "nav.puzzles": "पहेलियाँ",

@@ -48,6 +48,7 @@ export const en: Record<Key, string> = {
   "nav.games": "Games",
   "nav.analysis": "Analysis",
   "nav.online": "Play",
+  "nav.videos": "Videos",
   "nav.knowledge": "Knowledge base",
   "nav.repertoire": "Repertoire",
   "nav.puzzles": "Puzzles",

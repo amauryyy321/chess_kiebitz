@@ -42,6 +42,7 @@ export const es: Record<Key, string> = {
   "nav.games": "Partidas",
   "nav.analysis": "Análisis",
   "nav.online": "Jugar",
+  "nav.videos": "Vídeos",
   "nav.knowledge": "Base de conocimientos",
   "nav.repertoire": "Repertorio",
   "nav.puzzles": "Problemas",

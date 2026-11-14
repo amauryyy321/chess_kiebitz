@@ -22,6 +22,7 @@ export type PageId =
   | "analysis"
   | "play"
   | "online"
+  | "videos"
   | "repertoire"
   | "knowledge"
   | "endgame"
@@ -50,7 +51,7 @@ export interface Route {
   /** Analyse: Stellung aus einem geteilten Link (`kiebitz://p/…`). */
   shared?: SharePayload | null;
   /** Analyse: eine Zugfolge ab einer Stellung · etwa eine Partie gegen die Engine. */
-  line?: { fen: string; sans: string[]; chess960: boolean } | null;
+  line?: { fen: string; sans: string[]; chess960: boolean; orientation?: "white" | "black"; expectedMove?: string } | null;
   autoAnalyze?: boolean;
   analysisNotice?: string;
   puzzleReview?: boolean;
@@ -73,6 +74,7 @@ const PAGES: readonly PageId[] = [
   "analysis",
   "play",
   "online",
+  "videos",
   "repertoire",
   "knowledge",
   "endgame",
